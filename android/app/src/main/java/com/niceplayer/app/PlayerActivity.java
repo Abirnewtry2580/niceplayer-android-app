@@ -3,9 +3,12 @@ package com.niceplayer.app;
 import android.content.ContentValues;
 import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.media.AudioManager;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -109,6 +112,9 @@ public class PlayerActivity extends AppCompatActivity {
         TextView shot = button("▣", 24); shot.setContentDescription("Save screenshot");
         shot.setOnClickListener(v -> captureScreenshot());
         bar.addView(shot, new LinearLayout.LayoutParams(dp(50), dp(48)));
+        TextView preview = button("▦", 24); preview.setContentDescription("Create preview sheet");
+        preview.setOnClickListener(v -> createPreviewSheet());
+        bar.addView(preview, new LinearLayout.LayoutParams(dp(50), dp(48)));
         TextView rotate = button("↻", 25); rotate.setContentDescription("Rotate screen");
         rotate.setOnClickListener(v -> rotateScreen());
         bar.addView(rotate, new LinearLayout.LayoutParams(dp(50), dp(48)));
@@ -271,16 +277,81 @@ public class PlayerActivity extends AppCompatActivity {
         int[] xy = new int[2]; playerView.getLocationInWindow(xy);
         android.graphics.Rect area = new android.graphics.Rect(xy[0], xy[1], xy[0] + playerView.getWidth(), xy[1] + playerView.getHeight());
         PixelCopy.request(getWindow(), area, bitmap, result -> {
-            if (result == PixelCopy.SUCCESS) saveBitmap(bitmap);
+            if (result == PixelCopy.SUCCESS) saveBitmap(bitmap,
+                    "NicePlayer_" + System.currentTimeMillis() + ".jpg", "image/jpeg");
             else { bitmap.recycle(); Toast.makeText(this, "Screenshot failed", Toast.LENGTH_SHORT).show(); }
         }, new android.os.Handler(getMainLooper()));
     }
 
-    private void saveBitmap(Bitmap bitmap) {
+    private void createPreviewSheet() {
+        Toast.makeText(this, "Creating 25-frame preview…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            Bitmap sheet = null;
+            try {
+                retriever.setDataSource(this, videoUri);
+                String durationText = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+                long durationMs = durationText == null ? 0L : Long.parseLong(durationText);
+                if (durationMs <= 0) throw new IllegalStateException("Video duration unavailable");
+
+                final int columns = 5, rows = 5, frameWidth = 240, frameHeight = 135;
+                final int gap = 6, header = 86;
+                int width = columns * frameWidth + (columns + 1) * gap;
+                int height = header + rows * frameHeight + (rows + 1) * gap;
+                sheet = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(sheet);
+                canvas.drawColor(0xFF0F172A);
+                Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                paint.setColor(Color.WHITE); paint.setTextSize(25); paint.setTypeface(Typeface.DEFAULT_BOLD);
+                String titleText = getIntent().getStringExtra("title");
+                if (titleText == null || titleText.trim().isEmpty()) titleText = "Video preview";
+                if (titleText.length() > 55) titleText = titleText.substring(0, 52) + "…";
+                canvas.drawText(titleText, gap + 5, 32, paint);
+                paint.setColor(0xFF94A3B8); paint.setTextSize(18); paint.setTypeface(Typeface.DEFAULT);
+                canvas.drawText("Duration " + formatTime(durationMs) + "  •  25 frames  •  NicePlayer", gap + 5, 62, paint);
+
+                for (int i = 0; i < columns * rows; i++) {
+                    long timeMs = durationMs * (i + 1L) / (columns * rows + 1L);
+                    Bitmap frame = retriever.getFrameAtTime(timeMs * 1000L,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                    int row = i / columns, column = i % columns;
+                    int left = gap + column * (frameWidth + gap);
+                    int top = header + gap + row * (frameHeight + gap);
+                    paint.setColor(0xFF1E293B);
+                    canvas.drawRect(left, top, left + frameWidth, top + frameHeight, paint);
+                    if (frame != null) {
+                        Bitmap scaled = Bitmap.createScaledBitmap(frame, frameWidth, frameHeight, true);
+                        canvas.drawBitmap(scaled, left, top, null);
+                        if (scaled != frame) scaled.recycle();
+                        frame.recycle();
+                    }
+                    String stamp = formatTime(timeMs);
+                    paint.setTextSize(16); paint.setTypeface(Typeface.DEFAULT_BOLD);
+                    float textWidth = paint.measureText(stamp);
+                    paint.setColor(0xCC000000);
+                    canvas.drawRect(left + frameWidth - textWidth - 12, top + frameHeight - 25,
+                            left + frameWidth, top + frameHeight, paint);
+                    paint.setColor(Color.WHITE);
+                    canvas.drawText(stamp, left + frameWidth - textWidth - 6, top + frameHeight - 7, paint);
+                }
+                Bitmap completed = sheet;
+                runOnUiThread(() -> saveBitmap(completed,
+                        "NicePlayer_Preview_" + System.currentTimeMillis() + ".jpg", "image/jpeg"));
+            } catch (Exception error) {
+                if (sheet != null) sheet.recycle();
+                runOnUiThread(() -> Toast.makeText(PlayerActivity.this,
+                        "Could not create preview for this video", Toast.LENGTH_LONG).show());
+            } finally {
+                try { retriever.release(); } catch (Exception ignored) { }
+            }
+        }).start();
+    }
+
+    private void saveBitmap(Bitmap bitmap, String fileName, String mimeType) {
         try {
             ContentValues values = new ContentValues();
-            values.put(MediaStore.Images.Media.DISPLAY_NAME, "NicePlayer_" + System.currentTimeMillis() + ".jpg");
-            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, mimeType);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                 values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/NicePlayer");
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
@@ -295,8 +366,10 @@ public class PlayerActivity extends AppCompatActivity {
                 ready.put(MediaStore.Images.Media.IS_PENDING, 0);
                 getContentResolver().update(output, ready, null, null);
             }
-            Toast.makeText(this, "Screenshot saved to Pictures/NicePlayer", Toast.LENGTH_LONG).show();
-        } catch (Exception e) { Toast.makeText(this, "Could not save screenshot", Toast.LENGTH_LONG).show(); }
+            Toast.makeText(this, fileName.startsWith("NicePlayer_Preview_")
+                    ? "Preview saved to Pictures/NicePlayer"
+                    : "Screenshot saved to Pictures/NicePlayer", Toast.LENGTH_LONG).show();
+        } catch (Exception e) { Toast.makeText(this, "Could not save image", Toast.LENGTH_LONG).show(); }
         finally { bitmap.recycle(); }
     }
 
