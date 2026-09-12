@@ -107,9 +107,55 @@
         .file-list { display: flex; flex-direction: column; gap: 6px; }
         .file-item { padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px; font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .file-item.active { background: #0284c7; }
+
+        /* Nova-style device library */
+        .library-screen { position:fixed; inset:0; z-index:100; overflow-y:auto; color:#f8fafc; padding:20px 18px 34px; background:radial-gradient(circle at 12% 8%,rgba(34,211,238,.16),transparent 28%),radial-gradient(circle at 88% 18%,rgba(139,92,246,.2),transparent 30%),linear-gradient(160deg,#050812,#090d1b 58%,#050711); }
+        .library-screen.hidden { display:none; }
+        .library-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:8px 0 20px; }
+        .brand-line { display:flex; align-items:center; gap:12px; }
+        .brand-orb { width:44px; height:44px; border-radius:15px; display:grid; place-items:center; font-size:21px; background:linear-gradient(135deg,#22d3ee,#7c3aed); box-shadow:0 0 28px rgba(34,211,238,.32); }
+        .library-title { font-size:24px; font-weight:800; letter-spacing:-.5px; }
+        .library-subtitle { color:#94a3b8; font-size:11px; margin-top:3px; }
+        .icon-action { border:1px solid rgba(255,255,255,.12); width:42px; height:42px; border-radius:14px; background:rgba(255,255,255,.07); color:#fff; font-size:17px; }
+        .search-shell { display:flex; align-items:center; gap:10px; padding:0 14px; height:48px; border:1px solid rgba(255,255,255,.1); border-radius:16px; background:rgba(15,23,42,.68); backdrop-filter:blur(14px); box-shadow:0 16px 45px rgba(0,0,0,.22); }
+        .search-shell input { width:100%; border:0; outline:0; background:transparent; color:#fff; font-size:13px; }
+        .section-row { display:flex; justify-content:space-between; align-items:end; margin:24px 2px 12px; }
+        .section-name { font-size:15px; font-weight:750; }
+        .section-note { color:#64748b; font-size:10px; }
+        .folder-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+        .folder-card { position:relative; overflow:hidden; min-height:122px; padding:16px; border:1px solid rgba(255,255,255,.09); border-radius:19px; text-align:left; color:#fff; background:linear-gradient(145deg,rgba(30,41,59,.84),rgba(15,23,42,.64)); box-shadow:0 13px 36px rgba(0,0,0,.23); }
+        .folder-card::after { content:''; position:absolute; width:78px; height:78px; right:-22px; top:-24px; border-radius:50%; background:rgba(34,211,238,.12); filter:blur(2px); }
+        .folder-icon { width:39px; height:39px; display:grid; place-items:center; border-radius:12px; margin-bottom:13px; background:linear-gradient(135deg,rgba(34,211,238,.23),rgba(124,58,237,.28)); }
+        .folder-name { font-size:13px; font-weight:750; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+        .folder-count { margin-top:5px; color:#94a3b8; font-size:10px; }
+        .video-list { display:flex; flex-direction:column; gap:9px; }
+        .video-row { display:flex; align-items:center; gap:12px; padding:11px; border:1px solid rgba(255,255,255,.08); border-radius:16px; background:rgba(15,23,42,.72); }
+        .video-thumb { width:54px; height:54px; flex:none; display:grid; place-items:center; border-radius:13px; color:#67e8f9; background:linear-gradient(145deg,#172554,#312e81); }
+        .video-info { flex:1; min-width:0; }
+        .video-name { font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .video-meta { color:#94a3b8; font-size:10px; margin-top:5px; }
+        .manual-open { display:block; margin-top:20px; padding:13px; border-radius:15px; text-align:center; color:#e0f2fe; border:1px solid rgba(34,211,238,.25); background:rgba(8,145,178,.12); font-size:12px; font-weight:700; }
+        .library-empty { padding:55px 12px; text-align:center; color:#94a3b8; font-size:12px; line-height:1.6; }
+        @media (min-width:700px) { .folder-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
     </style>
 </head>
 <body>
+
+    <section class="library-screen" id="libraryScreen">
+        <div class="library-head">
+            <div class="brand-line">
+                <div class="brand-orb">▶</div>
+                <div><div class="library-title" id="libraryTitle">NicePlayer</div><div class="library-subtitle" id="librarySubtitle">Your intelligent media library</div></div>
+            </div>
+            <button class="icon-action" id="libraryBack" style="display:none" onclick="showVideoFolders()">←</button>
+        </div>
+        <div class="search-shell"><span>⌕</span><input id="videoSearch" type="search" placeholder="Search folders or videos" oninput="filterLibrary(this.value)"></div>
+        <div class="section-row"><div class="section-name" id="sectionName">Video folders</div><div class="section-note" id="sectionNote">Scanning device…</div></div>
+        <div class="folder-grid" id="folderGrid"></div>
+        <div class="video-list" id="deviceVideoList" style="display:none"></div>
+        <div class="library-empty" id="libraryEmpty">Finding your videos…</div>
+        <label for="filePicker" class="manual-open">＋ Choose files manually</label>
+    </section>
 
     <div class="player-wrapper" id="playerWrapper">
         <div class="video-container" id="videoContainer">
@@ -133,7 +179,7 @@
         <!-- Top Header -->
         <div class="overlay top-bar">
             <div class="top-left">
-                <span style="cursor:pointer;" onclick="history.back()">←</span>
+                <span style="cursor:pointer;" onclick="openLibraryHome()">←</span>
                 <span id="videoTitle">Select Video (MKV, AVI, MP4, TS)...</span>
             </div>
             <div class="top-icons">
@@ -262,6 +308,15 @@
                     <div class="grid-btn" onclick="setSubColor('#38bdf8')">Blue</div>
                 </div>
             </div>
+            <div class="panel-section">
+                <div class="section-title">Subtitle Timing</div>
+                <div class="btn-grid">
+                    <div class="grid-btn" onclick="changeSubtitleDelay(-0.5)">−0.5s</div>
+                    <div class="grid-btn" onclick="resetSubtitleDelay()">Reset</div>
+                    <div class="grid-btn" onclick="changeSubtitleDelay(0.5)">+0.5s</div>
+                </div>
+                <div id="subtitleDelayText" style="font-size:11px; text-align:center; margin-top:7px;">Delay: 0.0s</div>
+            </div>
         </div>
 
         <div class="modal-panel" id="abLoopPanel">
@@ -327,6 +382,162 @@
         let touchStartY = 0, touchStartX = 0, isSwiping = false;
         let pointA = null, pointB = null;
         let hlsPlayer = null, ffmpeg = null;
+        let activeVideoUrl = null;
+        let subtitleUrl = null;
+        let subtitleText = '';
+        let subtitleDelay = 0;
+        const libraryScreen = document.getElementById('libraryScreen');
+        const folderGrid = document.getElementById('folderGrid');
+        const deviceVideoList = document.getElementById('deviceVideoList');
+        const libraryEmpty = document.getElementById('libraryEmpty');
+        let deviceFolders = [], visibleDeviceVideos = [];
+
+        function videoLibraryPlugin() {
+            return window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.VideoLibrary;
+        }
+
+        function closeLibraryHome() { libraryScreen.classList.add('hidden'); }
+        function openLibraryHome() { video.pause(); libraryScreen.classList.remove('hidden'); showVideoFolders(); }
+        function humanSize(bytes) {
+            let n = Number(bytes || 0), i = 0; const u = ['B','KB','MB','GB'];
+            while (n >= 1024 && i < 3) { n /= 1024; i++; }
+            return n ? n.toFixed(i > 1 ? 1 : 0) + ' ' + u[i] : '';
+        }
+
+        async function scanDeviceVideos() {
+            const plugin = videoLibraryPlugin();
+            if (!plugin) {
+                libraryEmpty.innerText = 'Automatic folder scan needs the Android media plugin. You can still choose files manually.';
+                document.getElementById('sectionNote').innerText = 'Manual mode';
+                return;
+            }
+            try {
+                const result = await plugin.getFolders();
+                deviceFolders = result.folders || [];
+                renderFolderCards(deviceFolders);
+            } catch (error) {
+                libraryEmpty.innerText = 'Allow video access in Android Settings, then reopen NicePlayer.';
+                document.getElementById('sectionNote').innerText = 'Permission required';
+            }
+        }
+
+        function renderFolderCards(folders) {
+            folderGrid.innerHTML = '';
+            folderGrid.style.display = 'grid'; deviceVideoList.style.display = 'none';
+            document.getElementById('libraryTitle').innerText = 'NicePlayer';
+            document.getElementById('librarySubtitle').innerText = 'Your intelligent media library';
+            document.getElementById('sectionName').innerText = 'Video folders';
+            document.getElementById('sectionNote').innerText = folders.length + ' found';
+            document.getElementById('libraryBack').style.display = 'none';
+            libraryEmpty.style.display = folders.length ? 'none' : 'block';
+            libraryEmpty.innerText = 'No videos found on this device.';
+            folders.forEach(folder => {
+                const card = document.createElement('button'); card.className = 'folder-card';
+                const icon = document.createElement('div'); icon.className = 'folder-icon'; icon.textContent = '▰';
+                const name = document.createElement('div'); name.className = 'folder-name'; name.textContent = folder.name;
+                const count = document.createElement('div'); count.className = 'folder-count'; count.textContent = folder.count + ' videos';
+                card.append(icon, name, count); card.addEventListener('click', () => showFolderVideos(folder));
+                folderGrid.appendChild(card);
+            });
+        }
+
+        function showVideoFolders() { visibleDeviceVideos = []; renderFolderCards(deviceFolders); }
+
+        async function showFolderVideos(folder) {
+            const plugin = videoLibraryPlugin(); if (!plugin) return;
+            document.getElementById('libraryTitle').innerText = folder.name;
+            document.getElementById('librarySubtitle').innerText = 'Device folder';
+            document.getElementById('sectionName').innerText = 'Videos';
+            document.getElementById('libraryBack').style.display = 'block';
+            folderGrid.style.display = 'none'; deviceVideoList.style.display = 'flex';
+            deviceVideoList.innerHTML = '<div class="library-empty">Loading videos…</div>';
+            try {
+                const result = await plugin.getVideos({ bucketId: folder.bucketId });
+                visibleDeviceVideos = (result.videos || []).map(item => ({ ...item, url: Capacitor.convertFileSrc(item.uri) }));
+                renderVideoRows(visibleDeviceVideos);
+            } catch (error) { deviceVideoList.innerHTML = '<div class="library-empty">Could not read this folder.</div>'; }
+        }
+
+        function renderVideoRows(videos) {
+            deviceVideoList.innerHTML = '';
+            document.getElementById('sectionNote').innerText = videos.length + ' items';
+            videos.forEach(item => {
+                const row = document.createElement('div'); row.className = 'video-row';
+                const thumb = document.createElement('div'); thumb.className = 'video-thumb'; thumb.textContent = '▶';
+                const info = document.createElement('div'); info.className = 'video-info';
+                const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
+                const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size) + (item.duration ? ' · ' + formatTime(item.duration / 1000) : '');
+                info.append(name, meta); row.append(thumb, info);
+                row.addEventListener('click', () => { playlist = videos; currentIndex = videos.indexOf(item); closeLibraryHome(); loadVideo(currentIndex); });
+                deviceVideoList.appendChild(row);
+            });
+        }
+
+        function filterLibrary(query) {
+            const q = query.trim().toLowerCase();
+            if (visibleDeviceVideos.length) renderVideoRows(visibleDeviceVideos.filter(v => v.name.toLowerCase().includes(q)));
+            else renderFolderCards(deviceFolders.filter(f => f.name.toLowerCase().includes(q)));
+        }
+
+        function setVideoSource(url) {
+            if (activeVideoUrl) URL.revokeObjectURL(activeVideoUrl);
+            activeVideoUrl = url;
+            video.src = url;
+        }
+
+        function waitForVideoResult(timeoutMs = 8000) {
+            return new Promise((resolve) => {
+                let finished = false;
+                const finish = (result) => {
+                    if (finished) return;
+                    finished = true;
+                    clearTimeout(timer);
+                    video.removeEventListener('loadedmetadata', playable);
+                    video.removeEventListener('canplay', playable);
+                    video.removeEventListener('error', failed);
+                    resolve(result);
+                };
+                const playable = () => finish(true);
+                const failed = () => finish(false);
+                const timer = setTimeout(failed, timeoutMs);
+                video.addEventListener('loadedmetadata', playable, { once: true });
+                video.addEventListener('canplay', playable, { once: true });
+                video.addEventListener('error', failed, { once: true });
+                video.load();
+            });
+        }
+
+        async function tryDirectPlayback(file) {
+            setVideoSource(file.url || URL.createObjectURL(file));
+            return waitForVideoResult();
+        }
+
+        async function loadFFmpeg() {
+            if (ffmpeg) return ffmpeg;
+            if (!window.FFmpeg) throw new Error('ffmpeg.min.js is missing');
+
+            const corePath = new URL('ffmpeg-core.js', document.baseURI).href;
+            const required = [
+                corePath,
+                corePath.replace(/\.js$/, '.wasm'),
+                corePath.replace(/\.js$/, '.worker.js')
+            ];
+
+            for (const asset of required) {
+                const response = await fetch(asset, { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error('Cannot load ' + asset.split('/').pop() + ' (HTTP ' + response.status + ')');
+                }
+            }
+
+            ffmpeg = FFmpeg.createFFmpeg({ log: false, corePath });
+            ffmpeg.setProgress(({ ratio }) => {
+                const percent = Math.max(0, Math.min(100, Math.round((ratio || 0) * 100)));
+                showLoader(true, 'Converting video: ' + percent + '%');
+            });
+            await ffmpeg.load();
+            return ffmpeg;
+        }
 
         // Audio Context Setup
         let audioCtx, audioSource, gainNode, bassFilter, trebleFilter;
@@ -350,6 +561,7 @@
             if (this.files.length > 0) {
                 playlist = Array.from(this.files);
                 currentIndex = 0;
+                closeLibraryHome();
                 loadVideo(currentIndex);
                 renderPlaylist();
             }
@@ -365,62 +577,61 @@
 
             if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
 
-            // Formats commonly decoded directly by Android System WebView.
-            if (['mp4', 'm4v', 'webm', 'ogg', 'ogv', '3gp', '3gpp', 'mov', 'mpg', 'mpeg', 'ts'].includes(ext)) {
-                video.src = URL.createObjectURL(file);
-                startPlayback(file.name);
-            } 
-            // A self-contained M3U8 may work. Playlists that refer to separate
-            // segment files cannot be reconstructed from one File object.
-            else if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
+            showLoader(true, 'Opening video...');
+
+            // HLS must be handled before the normal file playback attempt.
+            if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
                 hlsPlayer = new Hls();
                 hlsPlayer.loadSource(URL.createObjectURL(file));
                 hlsPlayer.attachMedia(video);
-                hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => startPlayback(file.name));
-            } 
-            // MKV, AVI, FLV Formats (Offline FFmpeg Transcoder)
-            else if (window.FFmpeg) {
+                hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => {
+                    showLoader(false);
+                    startPlayback(file.name);
+                });
+                hlsPlayer.on(Hls.Events.ERROR, (_, data) => {
+                    if (data.fatal) {
+                        showLoader(false);
+                        alert('This local M3U8 needs its separate segment files.');
+                    }
+                });
+            } else if (await tryDirectPlayback(file)) {
+                showLoader(false);
+                startPlayback(file.name);
+            } else {
                 showLoader(true, `Converting ${ext.toUpperCase()} file offline...`);
                 try {
-                    if (!ffmpeg) {
-                        const { createFFmpeg } = FFmpeg;
-                        // ffmpeg.min.js is only the API wrapper. Keep
-                        // ffmpeg-core.js, ffmpeg-core.wasm and (when supplied)
-                        // ffmpeg-core.worker.js beside this HTML file.
-                        ffmpeg = createFFmpeg({
-                            log: false,
-                            corePath: './ffmpeg-core.js'
-                        });
-                        await ffmpeg.load();
-                    }
+                    const engine = await loadFFmpeg();
                     const { fetchFile } = FFmpeg;
-                    ffmpeg.FS('writeFile', 'input.' + ext, await fetchFile(file));
+                    const inputName = 'input.' + (ext || 'bin');
+                    engine.FS('writeFile', inputName, await fetchFile(file.url || file));
                     
                     // Re-encode unsupported codecs into the WebView-friendly
                     // H.264/AAC MP4 combination. This is slower than remuxing,
                     // but works with substantially more input formats.
-                    await ffmpeg.run(
-                        '-i', 'input.' + ext,
+                    await engine.run(
+                        '-i', inputName,
                         '-c:v', 'libx264', '-preset', 'ultrafast',
                         '-c:a', 'aac', '-movflags', '+faststart',
                         '-y', 'output.mp4'
                     );
                     
-                    const data = ffmpeg.FS('readFile', 'output.mp4');
+                    const data = engine.FS('readFile', 'output.mp4');
                     const blob = new Blob([data.buffer], { type: 'video/mp4' });
-                    video.src = URL.createObjectURL(blob);
+                    setVideoSource(URL.createObjectURL(blob));
 
-                    ffmpeg.FS('unlink', 'input.' + ext);
-                    ffmpeg.FS('unlink', 'output.mp4');
+                    engine.FS('unlink', inputName);
+                    engine.FS('unlink', 'output.mp4');
                     
-                    showLoader(false);
-                    startPlayback(file.name);
+                    if (await waitForVideoResult(12000)) {
+                        showLoader(false);
+                        startPlayback(file.name);
+                    } else {
+                        throw new Error('Converted video cannot be decoded by this device');
+                    }
                 } catch (err) {
                     showLoader(false);
-                    alert("Offline conversion error: " + err.message);
+                    alert('This video could not be played. Conversion error: ' + err.message);
                 }
-            } else {
-                alert("Offline library files missing! Please keep hls.min.js & ffmpeg.min.js in the same folder.");
             }
             renderPlaylist();
         }
@@ -428,8 +639,11 @@
         function startPlayback(fileName) {
             const savedTime = localStorage.getItem('play_pos_' + fileName);
             if (savedTime) video.currentTime = parseFloat(savedTime);
-            video.play();
-            playIcon.innerText = '⏸';
+            video.play().then(() => {
+                playIcon.innerText = '⏸';
+            }).catch(() => {
+                playIcon.innerText = '▶';
+            });
             showControls();
         }
 
@@ -490,20 +704,67 @@
             closePanels();
         }
 
+        function toVtt(text, isSrt) {
+            const body = isSrt
+                ? text.replace(/(\d\d:\d\d:\d\d),(\d\d\d)/g, '$1.$2')
+                : text.replace(/^WEBVTT[^\n]*\n*/i, '');
+            return 'WEBVTT\n\n' + body;
+        }
+
+        function renderSubtitleTrack() {
+            if (!subtitleText) return;
+            video.querySelectorAll('track[kind="subtitles"]').forEach(track => track.remove());
+            if (subtitleUrl) URL.revokeObjectURL(subtitleUrl);
+
+            const shifted = subtitleText.replace(
+                /(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})/g,
+                (_, start, end) => shiftVttTime(start, subtitleDelay) + ' --> ' + shiftVttTime(end, subtitleDelay)
+            );
+            subtitleUrl = URL.createObjectURL(new Blob([shifted], { type: 'text/vtt' }));
+            const track = document.createElement('track');
+            track.kind = 'subtitles';
+            track.label = 'External subtitle';
+            track.src = subtitleUrl;
+            track.default = true;
+            video.appendChild(track);
+            track.addEventListener('load', () => { track.track.mode = 'showing'; }, { once: true });
+        }
+
+        function shiftVttTime(value, offset) {
+            const parts = value.split(':');
+            const seconds = Math.max(0, Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]) + offset);
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = (seconds % 60).toFixed(3).padStart(6, '0');
+            return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0') + ':' + secs;
+        }
+
+        function updateSubtitleDelayText() {
+            document.getElementById('subtitleDelayText').innerText = 'Delay: ' + (subtitleDelay >= 0 ? '+' : '') + subtitleDelay.toFixed(1) + 's';
+        }
+
+        function changeSubtitleDelay(amount) {
+            subtitleDelay = Math.round((subtitleDelay + amount) * 10) / 10;
+            renderSubtitleTrack();
+            updateSubtitleDelayText();
+        }
+
+        function resetSubtitleDelay() {
+            subtitleDelay = 0;
+            renderSubtitleTrack();
+            updateSubtitleDelayText();
+        }
+
         subPicker.addEventListener('change', function() {
             const file = this.files[0];
             if (file) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    let text = e.target.result;
-                    if (file.name.endsWith('.srt')) {
-                        text = "WEBVTT\n\n" + text.replace(/(\d\d:\d\d:\d\d),(\d\d\d)/g, '$1.$2');
-                    }
-                    const blob = new Blob([text], { type: 'text/vtt' });
-                    const track = document.createElement('track');
-                    track.kind = 'subtitles'; track.label = file.name; track.src = URL.createObjectURL(blob); track.default = true;
-                    video.appendChild(track);
-                    alert("Subtitle Loaded!");
+                    subtitleText = toVtt(e.target.result, file.name.toLowerCase().endsWith('.srt'));
+                    subtitleDelay = 0;
+                    renderSubtitleTrack();
+                    updateSubtitleDelayText();
+                    alert('Subtitle loaded');
                 };
                 reader.readAsText(file);
             }
@@ -669,6 +930,7 @@
             video.currentTime = origTime; if (wasPlaying) video.play();
             const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `Preview_Sheet.png`; a.click();
         }
+        window.addEventListener('DOMContentLoaded', scanDeviceVideos);
     </script>
 </body>
 </html>
