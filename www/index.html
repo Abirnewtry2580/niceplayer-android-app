@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NicePlayer Ultimate Pro</title>
+    
+    <!-- Local Offline Libraries (No Data Needed) -->
+    <script src="hls.min.js"></script>
+    <script src="ffmpeg.min.js"></script>
+    
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+        body { background-color: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; height: 100vh; display: flex; align-items: center; justify-content: center; }
+        
+        .player-wrapper { position: relative; width: 100vw; height: 100vh; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .video-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }
+        video { width: 100%; height: 100%; object-fit: contain; transition: filter 0.3s ease; }
+
+        /* Custom Subtitle Styling */
+        video::cue {
+            background: rgba(0, 0, 0, 0.8);
+            color: var(--sub-color, #ffffff);
+            font-size: var(--sub-size, 16px);
+            border-radius: 4px;
+        }
+
+        .player-wrapper.hide-controls .overlay,
+        .player-wrapper.hide-controls .side-btn { opacity: 0; pointer-events: none; }
+        .overlay { position: absolute; left: 0; right: 0; z-index: 10; transition: opacity 0.3s ease; opacity: 1; }
+        
+        /* Top Header */
+        .top-bar { top: 0; height: 50px; background: linear-gradient(to bottom, rgba(0,0,0,0.85), transparent); display: flex; align-items: center; justify-content: space-between; padding: 0 15px; }
+        .top-left { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 500; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 50%; }
+        .top-icons { display: flex; gap: 12px; align-items: center; font-size: 16px; }
+
+        /* Quick Tools Grid */
+        .quick-tools { 
+            top: 52px; background: rgba(0,0,0,0.75); display: flex; align-items: center;
+            justify-content: flex-start; padding: 10px; gap: 8px; overflow-x: auto; white-space: nowrap;
+            -webkit-overflow-scrolling: touch;
+        }
+        .quick-tools::-webkit-scrollbar { display: none; }
+        .tool-item { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 10px; color: #ccc; cursor: pointer; flex: 0 0 auto; width: 58px; }
+        .tool-icon { width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .tool-item.active .tool-icon { background: #0284c7; color: #fff; }
+
+        /* Side Action Button */
+        .side-btn { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); z-index: 10; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.2); width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: opacity 0.3s ease; }
+
+        /* Bottom Controls Bar */
+        .bottom-bar { bottom: 0; background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); padding: 10px 15px 15px; display: flex; flex-direction: column; gap: 8px; }
+        .progress-row { display: flex; align-items: center; gap: 10px; font-size: 11px; }
+        .progress-bar { flex: 1; accent-color: #0284c7; cursor: pointer; height: 4px; }
+
+        .main-controls { display: flex; align-items: center; justify-content: space-between; padding: 0 10px; }
+        .control-btn { background: none; border: none; color: #fff; font-size: 18px; cursor: pointer; }
+        .play-btn { width: 44px; height: 44px; background: #fff; color: #000; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+        
+        /* Modal Popup Panels */
+        .modal-panel {
+            position: absolute; right: 0; top: 0; bottom: 0; width: 320px; background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px); z-index: 30; padding: 20px; display: flex; flex-direction: column; gap: 15px;
+            transform: translateX(100%); transition: transform 0.3s ease; overflow-y: auto;
+        }
+        .modal-panel.active { transform: translateX(0); }
+        .modal-header { display: flex; align-items: center; justify-content: space-between; font-size: 16px; font-weight: bold; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; }
+        .close-btn { cursor: pointer; font-size: 18px; }
+
+        .panel-section { display: flex; flex-direction: column; gap: 8px; }
+        .section-title { font-size: 12px; color: #94a3b8; font-weight: 600; text-transform: uppercase; }
+        .btn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .grid-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 8px; font-size: 11px; text-align: center; cursor: pointer; }
+        .grid-btn.active { background: #0284c7; border-color: #38bdf8; }
+
+        /* Offline Loader Overlay */
+        .loader-overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.85); z-index: 40;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 12px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+        }
+        .loader-overlay.show { opacity: 1; pointer-events: all; }
+        .spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #0284c7; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Gesture & Tap Feedback */
+        .gesture-indicator {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.7); border: 1px solid rgba(255,255,255,0.2); padding: 12px 24px;
+            border-radius: 20px; font-size: 14px; pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 25;
+        }
+        .tap-feedback {
+            position: absolute; top: 0; bottom: 0; width: 35%; z-index: 5;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; font-weight: bold; background: rgba(255, 255, 255, 0.1);
+            opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+        }
+        .tap-left { left: 0; border-radius: 0 50% 50% 0; }
+        .tap-right { right: 0; border-radius: 50% 0 0 50%; }
+        .tap-active { opacity: 1; }
+
+        /* Lock State */
+        .locked .top-bar, .locked .quick-tools, .locked .side-btn, .locked .bottom-bar { display: none !important; }
+        .lock-only-btn { position: absolute; left: 15px; bottom: 20px; z-index: 20; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.3); width: 36px; height: 36px; border-radius: 50%; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        
+        /* Playlist View */
+        .file-list { display: flex; flex-direction: column; gap: 6px; }
+        .file-item { padding: 8px; background: rgba(255,255,255,0.05); border-radius: 6px; font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-item.active { background: #0284c7; }
+    </style>
+</head>
+<body>
+
+    <div class="player-wrapper" id="playerWrapper">
+        <div class="video-container" id="videoContainer">
+            <video id="videoPlayer" src="" preload="metadata" crossorigin="anonymous"></video>
+        </div>
+
+        <!-- Transcoder Loader Overlay -->
+        <div class="loader-overlay" id="loaderOverlay">
+            <div class="spinner"></div>
+            <div id="loaderText" style="font-size:13px;">Offline Transcoding Engine...</div>
+        </div>
+
+        <!-- Indicators -->
+        <div class="gesture-indicator" id="gestureIndicator">Volume: 100%</div>
+        <div class="tap-feedback tap-left" id="tapLeft">⏪ 10s</div>
+        <div class="tap-feedback tap-right" id="tapRight">10s ⏩</div>
+
+        <!-- Lock Control -->
+        <button class="lock-only-btn" onclick="toggleLock(event)"><span id="lockIcon">🔓</span></button>
+
+        <!-- Top Header -->
+        <div class="overlay top-bar">
+            <div class="top-left">
+                <span style="cursor:pointer;" onclick="history.back()">←</span>
+                <span id="videoTitle">Select Video (MKV, AVI, MP4, TS)...</span>
+            </div>
+            <div class="top-icons">
+                <span title="Playlist" onclick="openPanel('playlistPanel')">📑</span>
+                <span title="Audio & Sound Tools" onclick="openPanel('audioPanel')">🎵</span>
+                <span title="Subtitle Settings" onclick="openPanel('subPanel')">💬</span>
+                <label for="filePicker" title="Open Files" style="cursor:pointer;">📂</label>
+                <input type="file" id="filePicker" accept="video/*,.mkv,.avi,.flv,.ts,.m3u8" multiple style="display:none;">
+            </div>
+        </div>
+
+        <!-- Scrollable Quick Tools -->
+        <div class="overlay quick-tools">
+            <div class="tool-item" onclick="openPanel('ratioPanel')"><div class="tool-icon">📐</div>Ratio</div>
+            <div class="tool-item" onclick="openPanel('visualPanel')"><div class="tool-icon">🎨</div>Visual</div>
+            <div class="tool-item" onclick="openPanel('abLoopPanel')"><div class="tool-icon">🔁</div>A-B Loop</div>
+            <div class="tool-item" onclick="openPanel('speedPanel')"><div class="tool-icon" id="speedBadge">1x</div>Speed</div>
+            <div class="tool-item" onclick="openPanel('eqPanel')"><div class="tool-icon">🎛️</div>EQ</div>
+            <div class="tool-item" onclick="stepFrame(1)"><div class="tool-icon">🎞️</div>Frame+</div>
+            <div class="tool-item" onclick="generatePreviewSheet()"><div class="tool-icon">🖼️</div>Preview</div>
+            <div class="tool-item" onclick="openPanel('timerPanel')"><div class="tool-icon">⏱️</div>Timer</div>
+            <div class="tool-item" onclick="toggleMirror()"><div class="tool-icon">🪞</div>Mirror</div>
+            <div class="tool-item" onclick="toggleRotate()"><div class="tool-icon">🔄</div>Rotate</div>
+            <div class="tool-item" onclick="toggleMute()"><div class="tool-icon" id="muteIcon">🔊</div>Mute</div>
+            <div class="tool-item" onclick="togglePiP()"><div class="tool-icon">📱</div>Pop-up</div>
+        </div>
+
+        <!-- Side Screenshot Button -->
+        <div class="side-btn" onclick="takeScreenshot(event)" title="Video Screenshot Only">📷</div>
+
+        <!-- Bottom Controls Bar -->
+        <div class="overlay bottom-bar">
+            <div class="progress-row">
+                <span id="currentTime">00:00</span>
+                <input type="range" id="progressBar" class="progress-bar" value="0" min="0" max="100">
+                <span id="duration">00:00</span>
+            </div>
+
+            <div class="main-controls">
+                <button class="control-btn" onclick="playPrev()">⏮</button>
+                <button class="control-btn" onclick="skip(-10)">⏪10</button>
+                <button class="play-btn" onclick="togglePlay(event)"><span id="playIcon">▶</span></button>
+                <button class="control-btn" onclick="skip(10)">10⏩</button>
+                <button class="control-btn" onclick="playNext()">⏭</button>
+                <button class="control-btn" onclick="toggleFullscreen()">⛶</button>
+            </div>
+        </div>
+
+        <!-- Panels -->
+        <div class="modal-panel" id="ratioPanel">
+            <div class="modal-header"><span>Aspect Ratio</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="panel-section">
+                <div class="section-title">Screen</div>
+                <div class="btn-grid">
+                    <div class="grid-btn active" onclick="setRatio('contain')">Fit</div>
+                    <div class="grid-btn" onclick="setRatio('cover')">Fill</div>
+                    <div class="grid-btn" onclick="setRatio('none')">Original</div>
+                    <div class="grid-btn" onclick="setRatio('fill')">Stretch</div>
+                </div>
+            </div>
+            <div class="panel-section">
+                <div class="section-title">Standard & Cinema</div>
+                <div class="btn-grid">
+                    <div class="grid-btn" onclick="setCustomRatio(16/9)">16:9</div>
+                    <div class="grid-btn" onclick="setCustomRatio(4/3)">4:3</div>
+                    <div class="grid-btn" onclick="setCustomRatio(2.35)">2.35:1</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-panel" id="visualPanel">
+            <div class="modal-header"><span>Visual Enhancer</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="panel-section">
+                <div class="btn-grid" style="grid-template-columns: repeat(2, 1fr);">
+                    <div class="grid-btn active" onclick="setFilter('none')">Original</div>
+                    <div class="grid-btn" onclick="setFilter('contrast(125%) saturate(130%)')">HDR</div>
+                    <div class="grid-btn" onclick="setFilter('brightness(110%) contrast(110%)')">Clear</div>
+                    <div class="grid-btn" onclick="setFilter('hue-rotate(180deg)')">Arctic Blue</div>
+                    <div class="grid-btn" onclick="setFilter('sepia(30%) saturate(140%)')">Warm Glow</div>
+                    <div class="grid-btn" onclick="setFilter('contrast(130%) sepia(20%)')">Cinematic</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-panel" id="audioPanel">
+            <div class="modal-header"><span>Audio & Sound</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="panel-section">
+                <div class="section-title">Volume Boost (200%)</div>
+                <input type="range" id="volBoostSlider" min="1" max="2" step="0.1" value="1" style="width:100%;">
+                <div id="volBoostText" style="font-size:11px; text-align:center;">Boost: 100%</div>
+            </div>
+        </div>
+
+        <div class="modal-panel" id="eqPanel">
+            <div class="modal-header"><span>Audio Equalizer</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="panel-section">
+                <div class="section-title">Presets</div>
+                <div class="btn-grid">
+                    <div class="grid-btn active" onclick="setEQ(0,0)">Flat</div>
+                    <div class="grid-btn" onclick="setEQ(6,3)">Bass Boost</div>
+                    <div class="grid-btn" onclick="setEQ(-2,5)">Vocal</div>
+                    <div class="grid-btn" onclick="setEQ(4,4)">Pop</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-panel" id="subPanel">
+            <div class="modal-header"><span>Subtitles</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="panel-section">
+                <label for="subPicker" class="grid-btn" style="display:block; text-align:center; cursor:pointer;">Load Subtitle File (.vtt/.srt)</label>
+                <input type="file" id="subPicker" accept=".vtt,.srt" style="display:none;">
+            </div>
+            <div class="panel-section">
+                <div class="section-title">Font Size</div>
+                <div class="btn-grid">
+                    <div class="grid-btn" onclick="setSubStyle('14px')">Small</div>
+                    <div class="grid-btn active" onclick="setSubStyle('18px')">Medium</div>
+                    <div class="grid-btn" onclick="setSubStyle('24px')">Large</div>
+                </div>
+            </div>
+            <div class="panel-section">
+                <div class="section-title">Font Color</div>
+                <div class="btn-grid">
+                    <div class="grid-btn" onclick="setSubColor('#ffffff')">White</div>
+                    <div class="grid-btn" onclick="setSubColor('#facc15')">Yellow</div>
+                    <div class="grid-btn" onclick="setSubColor('#38bdf8')">Blue</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal-panel" id="abLoopPanel">
+            <div class="modal-header"><span>A-B Repeat Loop</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="panel-section">
+                <div class="btn-grid" style="grid-template-columns: repeat(2, 1fr);">
+                    <div class="grid-btn" onclick="setPointA()">Set Point A</div>
+                    <div class="grid-btn" onclick="setPointB()">Set Point B</div>
+                </div>
+                <div class="grid-btn" style="margin-top:10px; background:#ef4444;" onclick="clearABLoop()">Clear Loop</div>
+                <div id="loopStatus" style="font-size:11px; text-align:center; margin-top:5px;">Loop Off</div>
+            </div>
+        </div>
+
+        <div class="modal-panel" id="speedPanel">
+            <div class="modal-header"><span>Playback Speed</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="panel-section">
+                <input type="range" id="speedSlider" min="0.25" max="3" step="0.05" value="1" style="width:100%;">
+                <div style="text-align:center; margin-top:10px;" id="speedValText">Speed: 1.0x</div>
+                <label style="font-size:11px; display:flex; gap:5px; margin-top:10px; align-items:center;">
+                    <input type="checkbox" id="pitchLock" checked onchange="togglePitchLock()"> Pitch Lock (Normal Voice)
+                </label>
+            </div>
+        </div>
+
+        <div class="modal-panel" id="playlistPanel">
+            <div class="modal-header"><span>Playlist</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="file-list" id="playlistContainer">
+                <div style="font-size:11px; color:#94a3b8;">No video loaded</div>
+            </div>
+        </div>
+
+        <div class="modal-panel" id="timerPanel">
+            <div class="modal-header"><span>Sleep Timer</span><span class="close-btn" onclick="closePanels()">✕</span></div>
+            <div class="panel-section">
+                <div class="btn-grid" style="grid-template-columns: repeat(2, 1fr);">
+                    <div class="grid-btn" onclick="setSleepTimer(15)">15 Mins</div>
+                    <div class="grid-btn" onclick="setSleepTimer(30)">30 Mins</div>
+                    <div class="grid-btn" onclick="setSleepTimer(60)">60 Mins</div>
+                    <div class="grid-btn" onclick="setSleepTimer(0)">Turn Off</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('videoPlayer');
+        const videoContainer = document.getElementById('videoContainer');
+        const filePicker = document.getElementById('filePicker');
+        const subPicker = document.getElementById('subPicker');
+        const playIcon = document.getElementById('playIcon');
+        const progressBar = document.getElementById('progressBar');
+        const currentTime = document.getElementById('currentTime');
+        const duration = document.getElementById('duration');
+        const videoTitle = document.getElementById('videoTitle');
+        const wrapper = document.getElementById('playerWrapper');
+        const gestureIndicator = document.getElementById('gestureIndicator');
+
+        let playlist = [], currentIndex = 0;
+        let hideTimeout, sleepTimeout;
+        let lastTap = 0, tapTimeout;
+        let isLocked = false, rotation = 0, isMirrored = false;
+        let touchStartY = 0, touchStartX = 0, isSwiping = false;
+        let pointA = null, pointB = null;
+        let hlsPlayer = null, ffmpeg = null;
+
+        // Audio Context Setup
+        let audioCtx, audioSource, gainNode, bassFilter, trebleFilter;
+        function initAudioAPI() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                audioSource = audioCtx.createMediaElementSource(video);
+                gainNode = audioCtx.createGain();
+                bassFilter = audioCtx.createBiquadFilter(); bassFilter.type = 'lowshelf';
+                trebleFilter = audioCtx.createBiquadFilter(); trebleFilter.type = 'highshelf';
+
+                audioSource.connect(bassFilter);
+                bassFilter.connect(trebleFilter);
+                trebleFilter.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+            }
+        }
+
+        // File Selection & Playlist Processing
+        filePicker.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                playlist = Array.from(this.files);
+                currentIndex = 0;
+                loadVideo(currentIndex);
+                renderPlaylist();
+            }
+        });
+
+        async function loadVideo(index) {
+            if (index < 0 || index >= playlist.length) return;
+            initAudioAPI();
+            currentIndex = index;
+            const file = playlist[index];
+            videoTitle.innerText = file.name;
+            const ext = file.name.split('.').pop().toLowerCase();
+
+            if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
+
+            // Formats commonly decoded directly by Android System WebView.
+            if (['mp4', 'm4v', 'webm', 'ogg', 'ogv', '3gp', '3gpp', 'mov', 'mpg', 'mpeg', 'ts'].includes(ext)) {
+                video.src = URL.createObjectURL(file);
+                startPlayback(file.name);
+            } 
+            // A self-contained M3U8 may work. Playlists that refer to separate
+            // segment files cannot be reconstructed from one File object.
+            else if (ext === 'm3u8' && window.Hls && Hls.isSupported()) {
+                hlsPlayer = new Hls();
+                hlsPlayer.loadSource(URL.createObjectURL(file));
+                hlsPlayer.attachMedia(video);
+                hlsPlayer.on(Hls.Events.MANIFEST_PARSED, () => startPlayback(file.name));
+            } 
+            // MKV, AVI, FLV Formats (Offline FFmpeg Transcoder)
+            else if (window.FFmpeg) {
+                showLoader(true, `Converting ${ext.toUpperCase()} file offline...`);
+                try {
+                    if (!ffmpeg) {
+                        const { createFFmpeg } = FFmpeg;
+                        // ffmpeg.min.js is only the API wrapper. Keep
+                        // ffmpeg-core.js, ffmpeg-core.wasm and (when supplied)
+                        // ffmpeg-core.worker.js beside this HTML file.
+                        ffmpeg = createFFmpeg({
+                            log: false,
+                            corePath: './ffmpeg-core.js'
+                        });
+                        await ffmpeg.load();
+                    }
+                    const { fetchFile } = FFmpeg;
+                    ffmpeg.FS('writeFile', 'input.' + ext, await fetchFile(file));
+                    
+                    // Re-encode unsupported codecs into the WebView-friendly
+                    // H.264/AAC MP4 combination. This is slower than remuxing,
+                    // but works with substantially more input formats.
+                    await ffmpeg.run(
+                        '-i', 'input.' + ext,
+                        '-c:v', 'libx264', '-preset', 'ultrafast',
+                        '-c:a', 'aac', '-movflags', '+faststart',
+                        '-y', 'output.mp4'
+                    );
+                    
+                    const data = ffmpeg.FS('readFile', 'output.mp4');
+                    const blob = new Blob([data.buffer], { type: 'video/mp4' });
+                    video.src = URL.createObjectURL(blob);
+
+                    ffmpeg.FS('unlink', 'input.' + ext);
+                    ffmpeg.FS('unlink', 'output.mp4');
+                    
+                    showLoader(false);
+                    startPlayback(file.name);
+                } catch (err) {
+                    showLoader(false);
+                    alert("Offline conversion error: " + err.message);
+                }
+            } else {
+                alert("Offline library files missing! Please keep hls.min.js & ffmpeg.min.js in the same folder.");
+            }
+            renderPlaylist();
+        }
+
+        function startPlayback(fileName) {
+            const savedTime = localStorage.getItem('play_pos_' + fileName);
+            if (savedTime) video.currentTime = parseFloat(savedTime);
+            video.play();
+            playIcon.innerText = '⏸';
+            showControls();
+        }
+
+        function showLoader(show, text = "") {
+            const l = document.getElementById('loaderOverlay');
+            document.getElementById('loaderText').innerText = text;
+            l.classList.toggle('show', show);
+        }
+
+        function playNext() { if (currentIndex + 1 < playlist.length) loadVideo(currentIndex + 1); }
+        function playPrev() { if (currentIndex - 1 >= 0) loadVideo(currentIndex - 1); }
+
+        function renderPlaylist() {
+            const container = document.getElementById('playlistContainer');
+            container.innerHTML = '';
+            playlist.forEach((file, idx) => {
+                const item = document.createElement('div');
+                item.className = `file-item ${idx === currentIndex ? 'active' : ''}`;
+                item.textContent = `${idx + 1}. ${file.name}`;
+                item.addEventListener('click', () => loadVideo(idx));
+                container.appendChild(item);
+            });
+        }
+
+        video.addEventListener('ended', () => { playNext(); });
+
+        video.addEventListener('timeupdate', () => {
+            if (video.duration) {
+                progressBar.value = (video.currentTime / video.duration) * 100;
+                currentTime.innerText = formatTime(video.currentTime);
+                duration.innerText = formatTime(video.duration);
+                if (playlist[currentIndex]) {
+                    localStorage.setItem('play_pos_' + playlist[currentIndex].name, video.currentTime);
+                }
+            }
+            if (pointA !== null && pointB !== null && video.currentTime >= pointB) {
+                video.currentTime = pointA;
+            }
+        });
+
+        function stepFrame(frames) {
+            video.pause();
+            playIcon.innerText = '▶';
+            video.currentTime += (frames * (1 / 30));
+        }
+
+        document.getElementById('volBoostSlider').addEventListener('input', (e) => {
+            initAudioAPI();
+            const val = e.target.value;
+            gainNode.gain.value = val;
+            document.getElementById('volBoostText').innerText = `Boost: ${Math.round(val * 100)}%`;
+        });
+
+        function setEQ(bass, treble) {
+            initAudioAPI();
+            bassFilter.gain.value = bass;
+            trebleFilter.gain.value = treble;
+            closePanels();
+        }
+
+        subPicker.addEventListener('change', function() {
+            const file = this.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    let text = e.target.result;
+                    if (file.name.endsWith('.srt')) {
+                        text = "WEBVTT\n\n" + text.replace(/(\d\d:\d\d:\d\d),(\d\d\d)/g, '$1.$2');
+                    }
+                    const blob = new Blob([text], { type: 'text/vtt' });
+                    const track = document.createElement('track');
+                    track.kind = 'subtitles'; track.label = file.name; track.src = URL.createObjectURL(blob); track.default = true;
+                    video.appendChild(track);
+                    alert("Subtitle Loaded!");
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        function setSubStyle(size) { document.documentElement.style.setProperty('--sub-size', size); closePanels(); }
+        function setSubColor(color) { document.documentElement.style.setProperty('--sub-color', color); closePanels(); }
+
+        function setPointA() { pointA = video.currentTime; updateLoopUI(); }
+        function setPointB() { if(pointA !== null && video.currentTime > pointA) pointB = video.currentTime; updateLoopUI(); }
+        function clearABLoop() { pointA = null; pointB = null; updateLoopUI(); closePanels(); }
+        function updateLoopUI() {
+            const st = document.getElementById('loopStatus');
+            st.innerText = (pointA !== null && pointB !== null) ? `Loop: ${formatTime(pointA)} - ${formatTime(pointB)}` : (pointA !== null ? `A: ${formatTime(pointA)} (Set B)` : 'Loop Off');
+        }
+
+        function showControls() {
+            if (isLocked) return;
+            wrapper.classList.remove('hide-controls');
+            clearTimeout(hideTimeout);
+            hideTimeout = setTimeout(() => { if (!video.paused) wrapper.classList.add('hide-controls'); }, 2500);
+        }
+
+        wrapper.addEventListener('touchstart', (e) => {
+            if (e.target.closest('.overlay') || e.target.closest('.modal-panel') || isLocked) return;
+            touchStartY = e.touches[0].clientY; touchStartX = e.touches[0].clientX; isSwiping = true;
+        });
+
+        wrapper.addEventListener('touchmove', (e) => {
+            if (!isSwiping || isLocked) return;
+            const deltaY = touchStartY - e.touches[0].clientY;
+            const screenWidth = wrapper.clientWidth;
+
+            if (Math.abs(deltaY) > 10) {
+                if (touchStartX < screenWidth / 2) {
+                    let b = parseFloat(video.style.filter.replace(/[^\d.]/g, '') || 100);
+                    b = Math.min(Math.max(b + (deltaY > 0 ? 2 : -2), 20), 150);
+                    video.style.filter = `brightness(${b}%)`;
+                    showIndicator(`Brightness: ${Math.round(b)}%`);
+                } else {
+                    let v = Math.min(Math.max(video.volume + (deltaY > 0 ? 0.02 : -0.02), 0), 1);
+                    video.volume = v;
+                    showIndicator(`Volume: ${Math.round(v * 100)}%`);
+                }
+                touchStartY = e.touches[0].clientY;
+            }
+        });
+
+        wrapper.addEventListener('touchend', () => { isSwiping = false; });
+        function showIndicator(msg) { gestureIndicator.innerText = msg; gestureIndicator.style.opacity = 1; setTimeout(() => gestureIndicator.style.opacity = 0, 1000); }
+
+        wrapper.addEventListener('click', function(e) {
+            if (e.target.closest('.overlay') || e.target.closest('.modal-panel') || e.target.closest('.side-btn') || e.target.closest('.lock-only-btn')) return;
+            const currentTimeClick = new Date().getTime(); const tapLength = currentTimeClick - lastTap;
+            const screenWidth = wrapper.clientWidth; const clickX = e.clientX;
+            clearTimeout(tapTimeout);
+
+            if (tapLength < 300 && tapLength > 0) {
+                if (clickX < screenWidth * 0.35) { skip(-10); triggerFeedback('tapLeft'); }
+                else if (clickX > screenWidth * 0.65) { skip(10); triggerFeedback('tapRight'); }
+                showControls();
+            } else {
+                tapTimeout = setTimeout(() => {
+                    if (wrapper.classList.contains('hide-controls')) showControls();
+                    else wrapper.classList.add('hide-controls');
+                }, 300);
+            }
+            lastTap = currentTimeClick;
+        });
+
+        function triggerFeedback(id) { const el = document.getElementById(id); el.classList.add('tap-active'); setTimeout(() => el.classList.remove('tap-active'), 500); }
+
+        function togglePlay(e) { if (e) e.stopPropagation(); if (video.paused) { video.play(); playIcon.innerText = '⏸'; showControls(); } else { video.pause(); playIcon.innerText = '▶'; wrapper.classList.remove('hide-controls'); } }
+        progressBar.addEventListener('input', () => { video.currentTime = (progressBar.value / 100) * video.duration; });
+        function skip(v) { video.currentTime += v; }
+        function formatTime(sec) { let h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60); return h > 0 ? `${h<10?'0'+h:h}:${m<10?'0'+m:m}:${s<10?'0'+s:s}` : `${m<10?'0'+m:m}:${s<10?'0'+s:s}`; }
+
+        function openPanel(id) { closePanels(); document.getElementById(id).classList.add('active'); }
+        function closePanels() { document.querySelectorAll('.modal-panel').forEach(p => p.classList.remove('active')); }
+
+        function setRatio(objFit) { video.style.objectFit = objFit; videoContainer.style.width = '100%'; videoContainer.style.height = '100%'; closePanels(); }
+        function setCustomRatio(ratio) {
+            video.style.objectFit = 'fill'; const screenRatio = window.innerWidth / window.innerHeight;
+            if (screenRatio > ratio) { videoContainer.style.width = (window.innerHeight * ratio) + 'px'; videoContainer.style.height = '100%'; }
+            else { videoContainer.style.width = '100%'; videoContainer.style.height = (window.innerWidth / ratio) + 'px'; }
+            closePanels();
+        }
+        function setFilter(filterCss) { video.style.filter = filterCss; closePanels(); }
+
+        const speedSlider = document.getElementById('speedSlider');
+        speedSlider.addEventListener('input', () => {
+            const val = speedSlider.value; video.playbackRate = val;
+            document.getElementById('speedValText').innerText = `Speed: ${val}x`;
+            document.getElementById('speedBadge').innerText = `${val}x`;
+        });
+        function togglePitchLock() { video.preservesPitch = document.getElementById('pitchLock').checked; }
+
+        function setSleepTimer(mins) {
+            clearTimeout(sleepTimeout);
+            if (mins > 0) { sleepTimeout = setTimeout(() => { video.pause(); alert("Sleep Timer Triggered: Video Paused"); }, mins * 60 * 1000); alert(`Timer set for ${mins} mins`); }
+            else alert("Sleep Timer Disabled");
+            closePanels();
+        }
+
+        function toggleMirror() { isMirrored = !isMirrored; updateTransform(); }
+        function toggleRotate() { rotation = (rotation + 90) % 360; updateTransform(); }
+        function updateTransform() { video.style.transform = `rotate(${rotation}deg) scaleX(${isMirrored ? -1 : 1})`; }
+        function toggleMute() { video.muted = !video.muted; document.getElementById('muteIcon').innerText = video.muted ? '🔇' : '🔊'; }
+        function toggleLock(e) { if(e) e.stopPropagation(); isLocked = !isLocked; wrapper.classList.toggle('locked', isLocked); document.getElementById('lockIcon').innerText = isLocked ? '🔒' : '🔓'; }
+        async function togglePiP() {
+            try {
+                if (!document.pictureInPictureEnabled || !video.requestPictureInPicture) {
+                    return alert('এই ডিভাইসে Picture-in-Picture সমর্থিত নয়।');
+                }
+                if (document.pictureInPictureElement) await document.exitPictureInPicture();
+                else await video.requestPictureInPicture();
+            } catch (err) { alert('Picture-in-Picture চালু করা যায়নি।'); }
+        }
+        async function toggleFullscreen() {
+            try {
+                if (!document.fullscreenElement) {
+                    if (wrapper.requestFullscreen) await wrapper.requestFullscreen();
+                    else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+                } else if (document.exitFullscreen) await document.exitFullscreen();
+            } catch (err) { alert('Fullscreen চালু করা যায়নি।'); }
+        }
+
+        function takeScreenshot(e) {
+            if (e) e.stopPropagation(); if (!video.videoWidth) return alert("ভিডিও প্লে চালু করুন!");
+            const canvas = document.createElement('canvas'); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `Frame_${Math.floor(video.currentTime)}s.png`; a.click();
+        }
+
+        async function generatePreviewSheet() {
+            if (!video.videoWidth || !video.duration) return alert("ভিডিও প্লে চালু করুন!");
+            const wasPlaying = !video.paused; const origTime = video.currentTime; video.pause();
+            alert("প্রিভিউ শিট জেনারেট হচ্ছে...");
+
+            const cols = 5, rows = 5, total = cols * rows, headerH = 120, gap = 8, thumbW = 320;
+            const thumbH = Math.round((video.videoHeight / video.videoWidth) * thumbW);
+            const canvas = document.createElement('canvas'); canvas.width = (thumbW * cols) + (gap * (cols + 1)); canvas.height = headerH + (thumbH * rows) + (gap * (rows + 1));
+            const ctx = canvas.getContext('2d');
+
+            ctx.fillStyle = "#e2e8f0"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "rgba(148, 163, 184, 0.4)"; ctx.font = "bold 44px sans-serif"; ctx.textAlign = "right"; ctx.fillText("NicePlayer Pro", canvas.width - 20, 55);
+            ctx.fillStyle = "#0f172a"; ctx.font = "14px sans-serif"; ctx.textAlign = "left";
+            const file = playlist[currentIndex];
+            ctx.fillText(`File Name: ${file ? file.name : "Video"}`, 20, 30);
+            ctx.fillText(`Resolution: ${video.videoWidth} x ${video.videoHeight}`, 20, 60);
+            ctx.fillText(`Duration: ${formatTime(video.duration)}`, 20, 90);
+
+            const interval = video.duration / (total + 1);
+            for (let i = 0; i < total; i++) {
+                const t = interval * (i + 1); video.currentTime = t;
+                await new Promise(r => { const fn = () => { video.removeEventListener('seeked', fn); r(); }; video.addEventListener('seeked', fn); });
+                const r = Math.floor(i / cols), c = i % cols, x = gap + c * (thumbW + gap), y = headerH + gap + r * (thumbH + gap);
+                ctx.drawImage(video, x, y, thumbW, thumbH);
+                const txt = formatTime(t); ctx.font = "bold 13px monospace"; const tw = ctx.measureText(txt).width;
+                ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.fillRect(x + thumbW - tw - 10, y + thumbH - 22, tw + 8, 18);
+                ctx.fillStyle = "#ffffff"; ctx.fillText(txt, x + thumbW - tw - 6, y + thumbH - 8);
+            }
+            video.currentTime = origTime; if (wasPlaying) video.play();
+            const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `Preview_Sheet.png`; a.click();
+        }
+    </script>
+</body>
+</html>
