@@ -14,8 +14,6 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.PixelCopy;
 import android.view.View;
-import android.view.WindowInsets;
-import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -59,15 +57,7 @@ public class PlayerActivity extends AppCompatActivity {
         playerView = new PlayerView(this);
         playerView.setBackgroundColor(Color.BLACK);
         playerView.setUseController(true);
-        playerView.setControllerAutoShow(true);
-        playerView.setControllerHideOnTouch(true);
-        playerView.setControllerShowTimeoutMs(3500);
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_ALWAYS);
-        playerView.setShowRewindButton(true);
-        playerView.setShowFastForwardButton(true);
-        playerView.setShowPreviousButton(false);
-        playerView.setShowNextButton(false);
-        playerView.setShowSubtitleButton(true);
         root.addView(playerView, new FrameLayout.LayoutParams(-1, -1));
 
         TextView seekHint = button("", 18);
@@ -251,11 +241,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void hideSystemBars() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            WindowInsetsController c = getWindow().getInsetsController();
-            if (c != null) { c.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                c.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE); }
-        } else getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
