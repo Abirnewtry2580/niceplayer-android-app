@@ -2,10 +2,13 @@ package com.niceplayer.app;
 
 import android.Manifest;
 import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 import android.provider.MediaStore;
+import android.util.Base64;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -19,6 +22,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.io.OutputStream;
 
 @CapacitorPlugin(
     name = "VideoLibrary",
@@ -28,6 +32,59 @@ import java.util.Map;
     }
 )
 public class VideoLibraryPlugin extends Plugin {
+
+    @PluginMethod
+    public void saveImage(PluginCall call) {
+        String dataUrl = call.getString("dataUrl");
+        String requestedName = call.getString("fileName", "NicePlayer_Image.png");
+        if (dataUrl == null || dataUrl.trim().isEmpty()) {
+            call.reject("dataUrl is required");
+            return;
+        }
+
+        try {
+            int comma = dataUrl.indexOf(',');
+            String encoded = comma >= 0 ? dataUrl.substring(comma + 1) : dataUrl;
+            byte[] image = Base64.decode(encoded, Base64.DEFAULT);
+            String fileName = requestedName.toLowerCase().endsWith(".png")
+                    ? requestedName : requestedName + ".png";
+
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/png");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.put(MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/NicePlayer");
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            }
+
+            ContentResolver resolver = getContext().getContentResolver();
+            Uri uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new IllegalStateException("Could not create image file");
+
+            try (OutputStream stream = resolver.openOutputStream(uri)) {
+                if (stream == null) throw new IllegalStateException("Could not open image file");
+                stream.write(image);
+                stream.flush();
+            } catch (Exception error) {
+                resolver.delete(uri, null, null);
+                throw error;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues ready = new ContentValues();
+                ready.put(MediaStore.Images.Media.IS_PENDING, 0);
+                resolver.update(uri, ready, null, null);
+            }
+
+            JSObject result = new JSObject();
+            result.put("uri", uri.toString());
+            result.put("fileName", fileName);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("Could not save image", error);
+        }
+    }
 
     @PluginMethod
     public void getFolders(PluginCall call) {

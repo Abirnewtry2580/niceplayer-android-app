@@ -159,7 +159,7 @@
 
     <div class="player-wrapper" id="playerWrapper">
         <div class="video-container" id="videoContainer">
-            <video id="videoPlayer" src="" preload="metadata" crossorigin="anonymous"></video>
+            <video id="videoPlayer" src="" preload="metadata" playsinline></video>
         </div>
 
         <!-- Transcoder Loader Overlay -->
@@ -394,6 +394,22 @@
 
         function videoLibraryPlugin() {
             return window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.VideoLibrary;
+        }
+
+        async function saveCanvas(canvas, fileName) {
+            const dataUrl = canvas.toDataURL('image/png');
+            const plugin = videoLibraryPlugin();
+            if (plugin && plugin.saveImage) {
+                const result = await plugin.saveImage({ dataUrl, fileName });
+                alert('Saved to Gallery: Pictures/NicePlayer/' + result.fileName);
+                return;
+            }
+            const a = document.createElement('a');
+            a.href = dataUrl;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
         }
 
         function closeLibraryHome() { libraryScreen.classList.add('hidden'); }
@@ -877,11 +893,11 @@
         async function togglePiP() {
             try {
                 if (!document.pictureInPictureEnabled || !video.requestPictureInPicture) {
-                    return alert('এই ডিভাইসে Picture-in-Picture সমর্থিত নয়।');
+                    return alert('Picture-in-Picture is not supported on this device.');
                 }
                 if (document.pictureInPictureElement) await document.exitPictureInPicture();
                 else await video.requestPictureInPicture();
-            } catch (err) { alert('Picture-in-Picture চালু করা যায়নি।'); }
+            } catch (err) { alert('Could not start Picture-in-Picture.'); }
         }
         async function toggleFullscreen() {
             try {
@@ -889,20 +905,43 @@
                     if (wrapper.requestFullscreen) await wrapper.requestFullscreen();
                     else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
                 } else if (document.exitFullscreen) await document.exitFullscreen();
-            } catch (err) { alert('Fullscreen চালু করা যায়নি।'); }
+            } catch (err) { alert('Could not enter fullscreen mode.'); }
         }
 
-        function takeScreenshot(e) {
-            if (e) e.stopPropagation(); if (!video.videoWidth) return alert("ভিডিও প্লে চালু করুন!");
-            const canvas = document.createElement('canvas'); canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-            canvas.getContext('2d').drawImage(video, 0, 0);
-            const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `Frame_${Math.floor(video.currentTime)}s.png`; a.click();
+        async function takeScreenshot(e) {
+            if (e) e.stopPropagation();
+            if (!video.videoWidth || video.readyState < 2) return alert("Play a video first.");
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                await saveCanvas(canvas, `Frame_${Math.floor(video.currentTime)}s_${Date.now()}.png`);
+            } catch (error) {
+                alert('Screenshot could not be saved: ' + error.message);
+            }
+        }
+
+        function seekVideo(time, timeoutMs = 5000) {
+            return new Promise((resolve, reject) => {
+                let done = false;
+                const finish = (error) => {
+                    if (done) return;
+                    done = true;
+                    clearTimeout(timer);
+                    video.removeEventListener('seeked', onSeeked);
+                    error ? reject(error) : resolve();
+                };
+                const onSeeked = () => finish();
+                const timer = setTimeout(() => finish(new Error('Video seek timed out')), timeoutMs);
+                video.addEventListener('seeked', onSeeked, { once: true });
+                video.currentTime = Math.max(0, Math.min(time, video.duration - 0.05));
+            });
         }
 
         async function generatePreviewSheet() {
-            if (!video.videoWidth || !video.duration) return alert("ভিডিও প্লে চালু করুন!");
+            if (!video.videoWidth || !video.duration) return alert("Play a video first.");
             const wasPlaying = !video.paused; const origTime = video.currentTime; video.pause();
-            alert("প্রিভিউ শিট জেনারেট হচ্ছে...");
+            showLoader(true, "Creating preview: 0%");
 
             const cols = 5, rows = 5, total = cols * rows, headerH = 120, gap = 8, thumbW = 320;
             const thumbH = Math.round((video.videoHeight / video.videoWidth) * thumbW);
@@ -917,18 +956,26 @@
             ctx.fillText(`Resolution: ${video.videoWidth} x ${video.videoHeight}`, 20, 60);
             ctx.fillText(`Duration: ${formatTime(video.duration)}`, 20, 90);
 
-            const interval = video.duration / (total + 1);
-            for (let i = 0; i < total; i++) {
-                const t = interval * (i + 1); video.currentTime = t;
-                await new Promise(r => { const fn = () => { video.removeEventListener('seeked', fn); r(); }; video.addEventListener('seeked', fn); });
-                const r = Math.floor(i / cols), c = i % cols, x = gap + c * (thumbW + gap), y = headerH + gap + r * (thumbH + gap);
-                ctx.drawImage(video, x, y, thumbW, thumbH);
-                const txt = formatTime(t); ctx.font = "bold 13px monospace"; const tw = ctx.measureText(txt).width;
-                ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.fillRect(x + thumbW - tw - 10, y + thumbH - 22, tw + 8, 18);
-                ctx.fillStyle = "#ffffff"; ctx.fillText(txt, x + thumbW - tw - 6, y + thumbH - 8);
+            try {
+                const interval = video.duration / (total + 1);
+                for (let i = 0; i < total; i++) {
+                    const t = interval * (i + 1);
+                    await seekVideo(t);
+                    const r = Math.floor(i / cols), c = i % cols, x = gap + c * (thumbW + gap), y = headerH + gap + r * (thumbH + gap);
+                    ctx.drawImage(video, x, y, thumbW, thumbH);
+                    const txt = formatTime(t); ctx.font = "bold 13px monospace"; const tw = ctx.measureText(txt).width;
+                    ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.fillRect(x + thumbW - tw - 10, y + thumbH - 22, tw + 8, 18);
+                    ctx.fillStyle = "#ffffff"; ctx.fillText(txt, x + thumbW - tw - 6, y + thumbH - 8);
+                    showLoader(true, `Creating preview: ${Math.round(((i + 1) / total) * 100)}%`);
+                }
+                await saveCanvas(canvas, `Preview_Sheet_${Date.now()}.png`);
+            } catch (error) {
+                alert('Preview could not be created: ' + error.message);
+            } finally {
+                showLoader(false);
+                video.currentTime = origTime;
+                if (wasPlaying) video.play().catch(() => {});
             }
-            video.currentTime = origTime; if (wasPlaying) video.play();
-            const a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = `Preview_Sheet.png`; a.click();
         }
         window.addEventListener('DOMContentLoaded', scanDeviceVideos);
     </script>
