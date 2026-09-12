@@ -130,7 +130,9 @@
         .folder-count { margin-top:5px; color:#94a3b8; font-size:10px; }
         .video-list { display:flex; flex-direction:column; gap:9px; }
         .video-row { display:flex; align-items:center; gap:12px; padding:11px; border:1px solid rgba(255,255,255,.08); border-radius:16px; background:rgba(15,23,42,.72); }
-        .video-thumb { width:54px; height:54px; flex:none; display:grid; place-items:center; border-radius:13px; color:#67e8f9; background:linear-gradient(145deg,#172554,#312e81); }
+        .video-thumb { position:relative; width:112px; height:68px; flex:none; display:grid; place-items:center; overflow:hidden; border-radius:10px; color:#67e8f9; background:linear-gradient(145deg,#172554,#312e81); }
+        .video-thumb img { width:100%; height:100%; object-fit:cover; }
+        .thumb-duration { position:absolute; right:4px; bottom:4px; padding:2px 5px; border-radius:4px; background:rgba(0,0,0,.82); color:#fff; font-size:9px; font-weight:700; }
         .video-info { flex:1; min-width:0; }
         .video-name { font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .video-meta { color:#94a3b8; font-size:10px; margin-top:5px; }
@@ -414,6 +416,13 @@
 
         function closeLibraryHome() { libraryScreen.classList.add('hidden'); }
         function openLibraryHome() { video.pause(); libraryScreen.classList.remove('hidden'); showVideoFolders(); }
+        function handleAndroidBack() {
+            if (document.querySelector('.modal-panel.active')) { closePanels(); return; }
+            if (libraryScreen.classList.contains('hidden')) { openLibraryHome(); return; }
+            if (visibleDeviceVideos.length) { showVideoFolders(); return; }
+            const plugin = videoLibraryPlugin(); if (plugin && plugin.exitApp) plugin.exitApp();
+        }
+        window.handleAndroidBack = handleAndroidBack;
         function humanSize(bytes) {
             let n = Number(bytes || 0), i = 0; const u = ['B','KB','MB','GB'];
             while (n >= 1024 && i < 3) { n /= 1024; i++; }
@@ -479,12 +488,19 @@
             document.getElementById('sectionNote').innerText = videos.length + ' items';
             videos.forEach(item => {
                 const row = document.createElement('div'); row.className = 'video-row';
-                const thumb = document.createElement('div'); thumb.className = 'video-thumb'; thumb.textContent = '▶';
+                const thumb = document.createElement('div'); thumb.className = 'video-thumb';
+                if (item.thumbnail) { const image = document.createElement('img'); image.src = item.thumbnail; image.alt = ''; thumb.appendChild(image); }
+                else { thumb.textContent = '▶'; }
+                if (item.duration) { const badge = document.createElement('span'); badge.className = 'thumb-duration'; badge.textContent = formatTime(item.duration / 1000); thumb.appendChild(badge); }
                 const info = document.createElement('div'); info.className = 'video-info';
                 const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
                 const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size) + (item.duration ? ' · ' + formatTime(item.duration / 1000) : '');
                 info.append(name, meta); row.append(thumb, info);
-                row.addEventListener('click', () => { playlist = videos; currentIndex = videos.indexOf(item); closeLibraryHome(); loadVideo(currentIndex); });
+                row.addEventListener('click', async () => {
+                    const plugin = videoLibraryPlugin();
+                    if (plugin && plugin.playVideo) { await plugin.playVideo({ uri: item.uri, title: item.name }); return; }
+                    playlist = videos; currentIndex = videos.indexOf(item); closeLibraryHome(); loadVideo(currentIndex);
+                });
                 deviceVideoList.appendChild(row);
             });
         }

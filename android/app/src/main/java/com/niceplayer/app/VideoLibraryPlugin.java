@@ -3,6 +3,9 @@ package com.niceplayer.app;
 import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Size;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -23,6 +26,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.io.OutputStream;
+import java.io.ByteArrayOutputStream;
 
 @CapacitorPlugin(
     name = "VideoLibrary",
@@ -32,6 +36,24 @@ import java.io.OutputStream;
     }
 )
 public class VideoLibraryPlugin extends Plugin {
+
+    @PluginMethod
+    public void playVideo(PluginCall call) {
+        String uri = call.getString("uri");
+        if (uri == null || uri.trim().isEmpty()) { call.reject("uri is required"); return; }
+        Intent intent = new Intent(getContext(), PlayerActivity.class);
+        intent.setData(Uri.parse(uri));
+        intent.putExtra("title", call.getString("title", "Video"));
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        getActivity().startActivity(intent);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void exitApp(PluginCall call) {
+        getActivity().finish();
+        call.resolve();
+    }
 
     @PluginMethod
     public void saveImage(PluginCall call) {
@@ -170,12 +192,32 @@ public class VideoLibraryPlugin extends Plugin {
                     item.put("name", cursor.getString(nameColumn));
                     item.put("size", cursor.getLong(sizeColumn));
                     item.put("duration", cursor.getLong(durationColumn));
-                    item.put("uri", Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id)).toString());
+                    Uri videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
+                    item.put("uri", videoUri.toString());
+                    String thumbnail = makeThumbnail(videoUri, id);
+                    if (thumbnail != null) item.put("thumbnail", thumbnail);
                     videos.put(item);
                 }
             }
             JSObject result = new JSObject(); result.put("videos", videos); call.resolve(result);
         } catch (Exception error) { call.reject("Could not read folder", error); }
+    }
+
+    private String makeThumbnail(Uri uri, long id) {
+        try {
+            Bitmap bitmap;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                bitmap = getContext().getContentResolver().loadThumbnail(uri, new Size(320, 180), null);
+            } else {
+                bitmap = MediaStore.Video.Thumbnails.getThumbnail(
+                    getContext().getContentResolver(), id, MediaStore.Video.Thumbnails.MINI_KIND, null);
+            }
+            if (bitmap == null) return null;
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 72, out);
+            bitmap.recycle();
+            return "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+        } catch (Exception ignored) { return null; }
     }
 
     private static class Folder {
