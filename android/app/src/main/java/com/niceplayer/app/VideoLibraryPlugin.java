@@ -5,7 +5,7 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.graphics.Bitmap;
-import android.graphics.Size;
+import android.util.Size;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
