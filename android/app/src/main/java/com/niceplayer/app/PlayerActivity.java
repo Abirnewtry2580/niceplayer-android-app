@@ -5,6 +5,7 @@ import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -44,11 +45,20 @@ public class PlayerActivity extends AppCompatActivity {
     private float gestureStartX;
     private long gestureStartPosition;
     private boolean seekingByGesture;
+    private boolean gestureMoved;
+    private float gestureStartY;
+    private float startBrightness;
+    private int startVolume;
+    private AudioManager audioManager;
+    private long lastTapAt;
+    private float lastTapX;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
         videoUri = getIntent().getData();
         if (videoUri == null) { finish(); return; }
+        audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        resumePosition = getPreferences(MODE_PRIVATE).getLong(videoUri.toString(), 0L);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemBars();
 
@@ -70,7 +80,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         View gestureArea = new View(this);
         gestureArea.setBackgroundColor(Color.TRANSPARENT);
-        gestureArea.setContentDescription("Swipe left or right to seek");
+        gestureArea.setContentDescription("Swipe horizontally to seek or vertically for brightness and volume");
         gestureArea.setOnTouchListener((v, event) -> handleSeekGesture(event, seekHint));
         FrameLayout.LayoutParams gestureParams = new FrameLayout.LayoutParams(-1, -1);
         gestureParams.topMargin = dp(64);
@@ -136,6 +146,9 @@ public class PlayerActivity extends AppCompatActivity {
     @Override protected void onStop() {
         if (player != null) {
             resumePosition = player.getCurrentPosition(); resumePlay = player.getPlayWhenReady();
+            if (resumePosition > 5_000L) {
+                getPreferences(MODE_PRIVATE).edit().putLong(videoUri.toString(), resumePosition).apply();
+            }
             playerView.setPlayer(null); player.release(); player = null;
         }
         super.onStop();
@@ -166,13 +179,38 @@ public class PlayerActivity extends AppCompatActivity {
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
                 gestureStartX = event.getX();
+                gestureStartY = event.getY();
                 gestureStartPosition = player.getCurrentPosition();
+                WindowManager.LayoutParams window = getWindow().getAttributes();
+                startBrightness = window.screenBrightness < 0 ? 0.5f : window.screenBrightness;
+                startVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
                 seekingByGesture = false;
+                gestureMoved = false;
                 return true;
             case MotionEvent.ACTION_MOVE:
                 float distance = event.getX() - gestureStartX;
-                if (Math.abs(distance) < dp(18) && !seekingByGesture) return true;
-                seekingByGesture = true;
+                float vertical = gestureStartY - event.getY();
+                if (Math.abs(distance) < dp(18) && Math.abs(vertical) < dp(18) && !gestureMoved) return true;
+                if (!gestureMoved) {
+                    gestureMoved = true;
+                    seekingByGesture = Math.abs(distance) >= Math.abs(vertical);
+                }
+                if (!seekingByGesture) {
+                    float fraction = vertical / Math.max(1f, playerView.getHeight());
+                    if (gestureStartX < playerView.getWidth() / 2f) {
+                        WindowManager.LayoutParams params = getWindow().getAttributes();
+                        params.screenBrightness = Math.max(0.05f, Math.min(1f, startBrightness + fraction));
+                        getWindow().setAttributes(params);
+                        hint.setText("Brightness  " + Math.round(params.screenBrightness * 100) + "%");
+                    } else {
+                        int maximum = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                        int level = Math.max(0, Math.min(maximum, startVolume + Math.round(fraction * maximum)));
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0);
+                        hint.setText("Volume  " + Math.round(level * 100f / Math.max(1, maximum)) + "%");
+                    }
+                    hint.setVisibility(View.VISIBLE);
+                    return true;
+                }
                 long duration = player.getDuration();
                 if (duration <= 0) return true;
                 long change = (long) ((distance / Math.max(1f, playerView.getWidth())) * duration);
@@ -185,9 +223,24 @@ public class PlayerActivity extends AppCompatActivity {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 hint.setVisibility(View.GONE);
-                if (!seekingByGesture) {
-                    if (playerView.isControllerFullyVisible()) playerView.hideController();
-                    else playerView.showController();
+                if (!gestureMoved) {
+                    long now = android.os.SystemClock.elapsedRealtime();
+                    if (now - lastTapAt < 350 && Math.abs(event.getX() - lastTapX) < dp(100)) {
+                        long delta = event.getX() < playerView.getWidth() / 2f ? -SEEK_MS : SEEK_MS;
+                        long duration = player.getDuration();
+                        long target = Math.max(0, player.getCurrentPosition() + delta);
+                        if (duration > 0) target = Math.min(duration, target);
+                        player.seekTo(target);
+                        hint.setText(delta < 0 ? "− 10 seconds" : "+ 10 seconds");
+                        hint.setVisibility(View.VISIBLE);
+                        hint.postDelayed(() -> hint.setVisibility(View.GONE), 550);
+                        lastTapAt = 0;
+                    } else {
+                        lastTapAt = now;
+                        lastTapX = event.getX();
+                        if (playerView.isControllerFullyVisible()) playerView.hideController();
+                        else playerView.showController();
+                    }
                 }
                 return true;
             default:
@@ -230,10 +283,17 @@ public class PlayerActivity extends AppCompatActivity {
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
                 values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/NicePlayer");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
             Uri output = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
             if (output == null) throw new IllegalStateException();
             try (OutputStream stream = getContentResolver().openOutputStream(output)) {
                 if (stream == null || !bitmap.compress(Bitmap.CompressFormat.JPEG, 95, stream)) throw new IllegalStateException();
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentValues ready = new ContentValues();
+                ready.put(MediaStore.Images.Media.IS_PENDING, 0);
+                getContentResolver().update(output, ready, null, null);
             }
             Toast.makeText(this, "Screenshot saved to Pictures/NicePlayer", Toast.LENGTH_LONG).show();
         } catch (Exception e) { Toast.makeText(this, "Could not save screenshot", Toast.LENGTH_LONG).show(); }
