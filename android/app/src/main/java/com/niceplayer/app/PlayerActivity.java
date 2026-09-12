@@ -233,10 +233,10 @@ public class PlayerActivity extends AppCompatActivity {
                     long now = android.os.SystemClock.elapsedRealtime();
                     if (now - lastTapAt < 350 && Math.abs(event.getX() - lastTapX) < dp(100)) {
                         long delta = event.getX() < playerView.getWidth() / 2f ? -SEEK_MS : SEEK_MS;
-                        long duration = player.getDuration();
-                        long target = Math.max(0, player.getCurrentPosition() + delta);
-                        if (duration > 0) target = Math.min(duration, target);
-                        player.seekTo(target);
+                        long tapDuration = player.getDuration();
+                        long tapTarget = Math.max(0, player.getCurrentPosition() + delta);
+                        if (tapDuration > 0) tapTarget = Math.min(tapDuration, tapTarget);
+                        player.seekTo(tapTarget);
                         hint.setText(delta < 0 ? "− 10 seconds" : "+ 10 seconds");
                         hint.setVisibility(View.VISIBLE);
                         hint.postDelayed(() -> hint.setVisibility(View.GONE), 550);
