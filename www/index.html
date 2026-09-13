@@ -235,7 +235,6 @@
             <div class="tool-item" onclick="stepFrame(1)"><div class="tool-icon">🎞️</div>Frame+</div>
             <div class="tool-item" onclick="generatePreviewSheet()"><div class="tool-icon">🖼️</div>Preview</div>
             <div class="tool-item" onclick="openPanel('timerPanel')"><div class="tool-icon">⏱️</div>Timer</div>
-            <div class="tool-item" onclick="toggleMirror()"><div class="tool-icon">🪞</div>Mirror</div>
             <div class="tool-item" onclick="toggleRotate()"><div class="tool-icon">🔄</div>Rotate</div>
             <div class="tool-item" onclick="toggleMute()"><div class="tool-icon" id="muteIcon">🔊</div>Mute</div>
             <div class="tool-item" onclick="togglePiP()"><div class="tool-icon">📱</div>Pop-up</div>
@@ -412,7 +411,7 @@
         let playlist = [], currentIndex = 0;
         let hideTimeout, sleepTimeout;
         let lastTap = 0, tapTimeout;
-        let isLocked = false, rotation = 0, isMirrored = false;
+        let isLocked = false, rotation = 0;
         let touchStartY = 0, touchStartX = 0, isSwiping = false;
         let pointA = null, pointB = null;
         let hlsPlayer = null, ffmpeg = null;
@@ -1007,9 +1006,8 @@
             closePanels();
         }
 
-        function toggleMirror() { isMirrored = !isMirrored; updateTransform(); }
         function toggleRotate() { rotation = (rotation + 90) % 360; updateTransform(); }
-        function updateTransform() { video.style.transform = `rotate(${rotation}deg) scaleX(${isMirrored ? -1 : 1})`; }
+        function updateTransform() { video.style.transform = `rotate(${rotation}deg)`; }
         function toggleMute() { video.muted = !video.muted; document.getElementById('muteIcon').innerText = video.muted ? '🔇' : '🔊'; }
         function toggleLock(e) { if(e) e.stopPropagation(); isLocked = !isLocked; wrapper.classList.toggle('locked', isLocked); document.getElementById('lockIcon').innerText = isLocked ? '🔒' : '🔓'; }
         async function togglePiP() {
