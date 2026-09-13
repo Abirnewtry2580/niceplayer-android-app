@@ -313,7 +313,7 @@ public class PlayerActivity extends AppCompatActivity {
         lock = label("🔓", 17);GradientDrawable lockBackground=new GradientDrawable();lockBackground.setShape(GradientDrawable.OVAL);lockBackground.setColor(0xCC111827);lock.setBackground(lockBackground);lock.setOnClickListener(v -> toggleLock());
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(38); root.addView(lock,lp);
         screenshotButton = topCircle("📷", 23);
-        screenshotButton.setBackgroundColor(Color.TRANSPARENT);screenshotButton.setContentDescription("Take screenshot");screenshotButton.setOnClickListener(v->screenshot());
+        screenshotButton.setBackgroundColor(Color.TRANSPARENT);screenshotButton.setAlpha(.5f);screenshotButton.setContentDescription("Take screenshot");screenshotButton.setOnClickListener(v->screenshot());
         FrameLayout.LayoutParams screenshotParams=new FrameLayout.LayoutParams(dp(48),dp(48),Gravity.END|Gravity.CENTER_VERTICAL);screenshotParams.rightMargin=dp(18);root.addView(screenshotButton,screenshotParams);
         setContentView(root);
     }
