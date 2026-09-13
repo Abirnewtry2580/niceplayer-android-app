@@ -122,6 +122,12 @@
         .section-row { display:flex; justify-content:space-between; align-items:end; margin:24px 2px 12px; }
         .section-name { font-size:15px; font-weight:750; }
         .section-note { color:#64748b; font-size:10px; }
+        .library-tools { display:flex; gap:7px; align-items:center; }
+        .library-tools select,.mini-action { color:#cbd5e1; border:1px solid rgba(255,255,255,.1); border-radius:9px; background:#111827; padding:6px 8px; font-size:10px; }
+        .history-strip { display:flex; gap:9px; overflow-x:auto; margin:0 0 8px; }
+        .history-card { min-width:170px; max-width:170px; padding:11px; border:1px solid rgba(34,211,238,.18); border-radius:14px; color:#fff; background:rgba(8,145,178,.1); text-align:left; }
+        .history-name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11px; font-weight:700; }
+        .folder-star { position:absolute; z-index:2; right:10px; bottom:10px; font-size:17px; color:#facc15; }
         .folder-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
         .folder-card { position:relative; overflow:hidden; min-height:122px; padding:16px; border:1px solid rgba(255,255,255,.09); border-radius:19px; text-align:left; color:#fff; background:linear-gradient(145deg,rgba(30,41,59,.84),rgba(15,23,42,.64)); box-shadow:0 13px 36px rgba(0,0,0,.23); }
         .folder-card::after { content:''; position:absolute; width:78px; height:78px; right:-22px; top:-24px; border-radius:50%; background:rgba(34,211,238,.12); filter:blur(2px); }
@@ -152,7 +158,9 @@
             <button class="icon-action" id="libraryBack" style="display:none" onclick="showVideoFolders()">←</button>
         </div>
         <div class="search-shell"><span>⌕</span><input id="videoSearch" type="search" placeholder="Search folders or videos" oninput="filterLibrary(this.value)"></div>
-        <div class="section-row"><div class="section-name" id="sectionName">Video folders</div><div class="section-note" id="sectionNote">Scanning device…</div></div>
+        <div class="section-row" id="historyHeading" style="display:none"><div class="section-name">Continue watching</div></div>
+        <div class="history-strip" id="historyStrip"></div>
+        <div class="section-row"><div class="section-name" id="sectionName">Video folders</div><div class="library-tools"><select id="librarySort" onchange="applyLibrarySort()"><option value="date">Newest</option><option value="name">Name</option><option value="size">Size</option><option value="duration">Duration</option></select><button class="mini-action" onclick="toggleHiddenFolders()">Hidden</button><div class="section-note" id="sectionNote">Scanning device…</div></div></div>
         <div class="folder-grid" id="folderGrid"></div>
         <div class="video-list" id="deviceVideoList" style="display:none"></div>
         <div class="library-empty" id="libraryEmpty">Finding your videos…</div>
@@ -392,7 +400,7 @@
         const folderGrid = document.getElementById('folderGrid');
         const deviceVideoList = document.getElementById('deviceVideoList');
         const libraryEmpty = document.getElementById('libraryEmpty');
-        let deviceFolders = [], visibleDeviceVideos = [];
+        let deviceFolders = [], visibleDeviceVideos = [], currentFolder = null, showHiddenFolders = false;
 
         function videoLibraryPlugin() {
             return window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.VideoLibrary;
@@ -440,6 +448,7 @@
                 const result = await plugin.getFolders();
                 deviceFolders = result.folders || [];
                 renderFolderCards(deviceFolders);
+                loadPlaybackHistory();
             } catch (error) {
                 libraryEmpty.innerText = 'Allow video access in Android Settings, then reopen NicePlayer.';
                 document.getElementById('sectionNote').innerText = 'Permission required';
@@ -456,12 +465,17 @@
             document.getElementById('libraryBack').style.display = 'none';
             libraryEmpty.style.display = folders.length ? 'none' : 'block';
             libraryEmpty.innerText = 'No videos found on this device.';
+            const favorites = JSON.parse(localStorage.getItem('favorite_folders') || '[]');
+            const hidden = JSON.parse(localStorage.getItem('hidden_folders') || '[]');
+            folders = folders.filter(folder => showHiddenFolders || !hidden.includes(folder.bucketId)).sort((a,b)=>(favorites.includes(b.bucketId)?1:0)-(favorites.includes(a.bucketId)?1:0));
             folders.forEach(folder => {
                 const card = document.createElement('button'); card.className = 'folder-card';
                 const icon = document.createElement('div'); icon.className = 'folder-icon'; icon.textContent = '▰';
                 const name = document.createElement('div'); name.className = 'folder-name'; name.textContent = folder.name;
                 const count = document.createElement('div'); count.className = 'folder-count'; count.textContent = folder.count + ' videos';
-                card.append(icon, name, count); card.addEventListener('click', () => showFolderVideos(folder));
+                const star=document.createElement('span');star.className='folder-star';star.textContent=favorites.includes(folder.bucketId)?'★':'☆';star.addEventListener('click',event=>{event.stopPropagation();toggleFolderFavorite(folder.bucketId);});
+                card.append(icon, name, count,star); card.addEventListener('click', () => showFolderVideos(folder));
+                card.addEventListener('contextmenu',event=>{event.preventDefault();toggleFolderHidden(folder.bucketId);});
                 folderGrid.appendChild(card);
             });
         }
@@ -469,6 +483,7 @@
         function showVideoFolders() { visibleDeviceVideos = []; renderFolderCards(deviceFolders); }
 
         async function showFolderVideos(folder) {
+            currentFolder = folder;
             const plugin = videoLibraryPlugin(); if (!plugin) return;
             document.getElementById('libraryTitle').innerText = folder.name;
             document.getElementById('librarySubtitle').innerText = 'Device folder';
@@ -486,6 +501,7 @@
         function renderVideoRows(videos) {
             deviceVideoList.innerHTML = '';
             document.getElementById('sectionNote').innerText = videos.length + ' items';
+            const duplicateCount={};videos.forEach(v=>{const key=v.name+'|'+v.size;duplicateCount[key]=(duplicateCount[key]||0)+1;});
             videos.forEach(item => {
                 const row = document.createElement('div'); row.className = 'video-row';
                 const thumb = document.createElement('div'); thumb.className = 'video-thumb';
@@ -494,7 +510,7 @@
                 if (item.duration) { const badge = document.createElement('span'); badge.className = 'thumb-duration'; badge.textContent = formatTime(item.duration / 1000); thumb.appendChild(badge); }
                 const info = document.createElement('div'); info.className = 'video-info';
                 const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
-                const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size) + (item.duration ? ' · ' + formatTime(item.duration / 1000) : '');
+                const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size) + (item.duration ? ' · ' + formatTime(item.duration / 1000) : '')+(duplicateCount[item.name+'|'+item.size]>1?' · Possible duplicate':'');
                 info.append(name, meta); row.append(thumb, info);
                 row.addEventListener('click', async () => {
                     const plugin = videoLibraryPlugin();
@@ -515,10 +531,21 @@
         }
 
         function filterLibrary(query) {
+            if(query.trim())localStorage.setItem('last_search',query.trim());
             const q = query.trim().toLowerCase();
             if (visibleDeviceVideos.length) renderVideoRows(visibleDeviceVideos.filter(v => v.name.toLowerCase().includes(q)));
             else renderFolderCards(deviceFolders.filter(f => f.name.toLowerCase().includes(q)));
         }
+
+        function applyLibrarySort(){
+            const mode=document.getElementById('librarySort').value;
+            if(visibleDeviceVideos.length){const videos=[...visibleDeviceVideos];videos.sort((a,b)=>mode==='name'?a.name.localeCompare(b.name):mode==='size'?b.size-a.size:mode==='duration'?b.duration-a.duration:0);renderVideoRows(videos);}
+            else{const folders=[...deviceFolders];if(mode==='name')folders.sort((a,b)=>a.name.localeCompare(b.name));renderFolderCards(folders);}
+        }
+        function toggleFolderFavorite(id){let values=JSON.parse(localStorage.getItem('favorite_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('favorite_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
+        function toggleFolderHidden(id){let values=JSON.parse(localStorage.getItem('hidden_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('hidden_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
+        function toggleHiddenFolders(){showHiddenFolders=!showHiddenFolders;renderFolderCards(deviceFolders);}
+        async function loadPlaybackHistory(){const plugin=videoLibraryPlugin();if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),items=result.items||[],strip=document.getElementById('historyStrip');strip.innerHTML='';document.getElementById('historyHeading').style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>plugin.playVideo({uri:item.uri,title:item.name,index:0,uris:[item.uri],titles:[item.name]});strip.appendChild(card);});}catch(error){}}
 
         function setVideoSource(url) {
             if (activeVideoUrl) URL.revokeObjectURL(activeVideoUrl);
