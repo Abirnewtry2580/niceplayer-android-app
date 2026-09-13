@@ -151,7 +151,7 @@ public class PlayerActivity extends AppCompatActivity {
             finish();
             return;
         }
-        loadWaveform();
+        scheduleWaveform();
         handler.post(ticker);
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() { finish(); }
@@ -270,7 +270,7 @@ public class PlayerActivity extends AppCompatActivity {
         title.setText(currentTitle());
         player.stop();
         startPlayback(true);
-        loadWaveform();
+        scheduleWaveform();
     }
 
     private void makeUi() {
@@ -331,6 +331,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void loadWaveform(){if(waveform==null)return;waveform.setLevels(null);Uri uri=sourceUri;worker.execute(()->AudioWaveformExtractor.extract(this,uri,180,new AudioWaveformExtractor.Callback(){public void complete(float[] levels){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null)waveform.setLevels(levels);});}public void failed(){}}));}
+    private void scheduleWaveform(){if(waveform!=null)waveform.setLevels(null);handler.postDelayed(this::loadWaveform,2200);}
 
     private TextView addControl(LinearLayout row,String text,int size,View.OnClickListener click){TextView v=label(text,size);if(click!=null)v.setOnClickListener(click);row.addView(v,new LinearLayout.LayoutParams(0,dp(55),1));return v;}
 
