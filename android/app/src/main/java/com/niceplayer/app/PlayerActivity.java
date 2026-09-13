@@ -54,6 +54,8 @@ public class PlayerActivity extends AppCompatActivity {
     private SharedPreferences preferences;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private long lastPositionSave;
+    private long pendingSeek = -1;
+    private int soundProtection;
     private long downTime;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable hideLockButton = () -> {
@@ -90,6 +92,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (playlistTitles.isEmpty()) playlistTitles.add(getIntent().getStringExtra("title"));
         playlistIndex = Math.min(playlistIndex, playlistUris.size() - 1);
         preferences = getSharedPreferences("playback", MODE_PRIVATE);
+        soundProtection = preferences.getInt("sound_protection", 0);
         audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
@@ -135,6 +138,16 @@ public class PlayerActivity extends AppCompatActivity {
             media.setHWDecoderEnabled(hardwareDecoder, hardwareDecoder);
             media.addOption(":clock-jitter=0");
             media.addOption(":clock-synchro=0");
+            if (soundProtection > 0) {
+                media.addOption(":audio-filter=compressor,normvol");
+                media.addOption(":compressor-attack=" + (soundProtection == 1 ? "25" : soundProtection == 2 ? "10" : "5"));
+                media.addOption(":compressor-release=" + (soundProtection == 1 ? "250" : soundProtection == 2 ? "350" : "500"));
+                media.addOption(":compressor-threshold=" + (soundProtection == 1 ? "-12" : soundProtection == 2 ? "-18" : "-24"));
+                media.addOption(":compressor-ratio=" + (soundProtection == 1 ? "2" : soundProtection == 2 ? "4" : "8"));
+                media.addOption(":compressor-knee=" + (soundProtection == 1 ? "2" : soundProtection == 2 ? "3" : "5"));
+                media.addOption(":compressor-makeup-gain=" + (soundProtection == 1 ? "2" : soundProtection == 2 ? "4" : "6"));
+                media.addOption(":norm-max-level=1.0");
+            }
             player.setMedia(media);
             media.release();
             player.play();
@@ -170,6 +183,11 @@ public class PlayerActivity extends AppCompatActivity {
     private String positionKey() { return "position_" + sourceUri; }
 
     private void restorePosition() {
+        if (pendingSeek >= 0) {
+            player.setTime(pendingSeek);
+            pendingSeek = -1;
+            return;
+        }
         long saved = preferences.getLong(positionKey(), 0);
         long length = player.getLength();
         if (saved > 5000 && (length <= 0 || saved < length - 10000)) player.setTime(saved);
@@ -303,8 +321,16 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,3,2,"Sleep timer");
         m.getMenu().add(0,4,3,"Create preview sheet");
         m.getMenu().add(0,5,4,"Mirror video");
-        if(Build.VERSION.SDK_INT>=26)m.getMenu().add(0,6,5,"Picture in picture");
-        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 5:video.setScaleX(video.getScaleX()<0?1f:-1f);break;case 6:enterPip();break;}return true;});m.show();
+        m.getMenu().add(0,7,5,"Sudden sound protection");
+        if(Build.VERSION.SDK_INT>=26)m.getMenu().add(0,6,6,"Picture in picture");
+        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 5:video.setScaleX(video.getScaleX()<0?1f:-1f);break;case 6:enterPip();break;case 7:soundProtectionMenu();break;}return true;});m.show();
+    }
+    private void soundProtectionMenu(){
+        String[] modes={"Off","Low","Medium","Strong"};
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Sudden sound protection").setSingleChoiceItems(modes,soundProtection,(dialog,which)->{
+            long position=Math.max(0,player.getTime());soundProtection=which;preferences.edit().putInt("sound_protection",which).apply();pendingSeek=position;
+            player.stop();softwareRetryAttempted=false;startPlayback(true);dialog.dismiss();Toast.makeText(this,"Sound protection: "+modes[which],Toast.LENGTH_SHORT).show();
+        }).show();
     }
     private void audioTracks(){
         MediaPlayer.TrackDescription[] tracks=player.getAudioTracks();
