@@ -66,6 +66,14 @@ public class VideoLibraryPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void getHistory(PluginCall call) {
+        android.content.SharedPreferences preferences=getContext().getSharedPreferences("playback",android.content.Context.MODE_PRIVATE);
+        JSArray items=new JSArray();
+        for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri==null)continue;JSObject item=new JSObject();item.put("uri",uri);item.put("name",preferences.getString("history_name_"+i,"Video"));item.put("position",preferences.getLong("position_"+uri,0));items.put(item);}
+        JSObject result=new JSObject();result.put("items",items);call.resolve(result);
+    }
+
+    @PluginMethod
     public void saveImage(PluginCall call) {
         String dataUrl = call.getString("dataUrl");
         String requestedName = call.getString("fileName", "NicePlayer_Image.png");
