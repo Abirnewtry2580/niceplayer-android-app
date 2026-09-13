@@ -36,6 +36,8 @@ import java.util.Collections;
 import java.util.List;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @CapacitorPlugin(
     name = "VideoLibrary",
@@ -45,6 +47,7 @@ import java.io.ByteArrayOutputStream;
     }
 )
 public class VideoLibraryPlugin extends Plugin {
+    private final ExecutorService thumbnailWorker = Executors.newFixedThreadPool(2);
     private ActivityResultLauncher<IntentSenderRequest> mutationLauncher;
     private PluginCall pendingMutationCall;
     private String pendingMutationType;
@@ -318,8 +321,6 @@ public class VideoLibraryPlugin extends Plugin {
                     item.put("duration", cursor.getLong(durationColumn));
                     Uri videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
                     item.put("uri", videoUri.toString());
-                    String thumbnail = makeThumbnail(videoUri, id);
-                    if (thumbnail != null) item.put("thumbnail", thumbnail);
                     videos.put(item);
                 }
             }
@@ -327,18 +328,32 @@ public class VideoLibraryPlugin extends Plugin {
         } catch (Exception error) { call.reject("Could not read folder", error); }
     }
 
+    @PluginMethod
+    public void getThumbnail(PluginCall call) {
+        String rawUri=call.getString("uri");
+        if(rawUri==null){call.reject("uri is required");return;}
+        thumbnailWorker.execute(()->{
+            try{
+                Uri uri=Uri.parse(rawUri);long id=-1;
+                try{id=Long.parseLong(uri.getLastPathSegment());}catch(Exception ignored){}
+                String thumbnail=makeThumbnail(uri,id);JSObject result=new JSObject();
+                if(thumbnail!=null)result.put("thumbnail",thumbnail);call.resolve(result);
+            }catch(Exception error){call.reject("Could not create thumbnail",error);}
+        });
+    }
+
     private String makeThumbnail(Uri uri, long id) {
         try {
             Bitmap bitmap;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                bitmap = getContext().getContentResolver().loadThumbnail(uri, new Size(320, 180), null);
+                bitmap = getContext().getContentResolver().loadThumbnail(uri, new Size(240, 135), null);
             } else {
                 bitmap = MediaStore.Video.Thumbnails.getThumbnail(
                     getContext().getContentResolver(), id, MediaStore.Video.Thumbnails.MINI_KIND, null);
             }
             if (bitmap == null) return null;
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 72, out);
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 58, out);
             bitmap.recycle();
             return "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
         } catch (Exception ignored) { return null; }
