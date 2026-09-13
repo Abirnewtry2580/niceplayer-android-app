@@ -308,7 +308,7 @@ public class PlayerActivity extends AppCompatActivity {
         lock = label("🔓", 17);GradientDrawable lockBackground=new GradientDrawable();lockBackground.setShape(GradientDrawable.OVAL);lockBackground.setColor(0xCC111827);lock.setBackground(lockBackground);lock.setOnClickListener(v -> toggleLock());
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(38); root.addView(lock,lp);
         screenshotButton = topCircle("📷", 23);
-        GradientDrawable screenshotBackground=new GradientDrawable();screenshotBackground.setShape(GradientDrawable.OVAL);screenshotBackground.setColor(0x88000000);screenshotButton.setBackground(screenshotBackground);screenshotButton.setContentDescription("Take screenshot");screenshotButton.setOnClickListener(v->screenshot());
+        screenshotButton.setBackgroundColor(Color.TRANSPARENT);screenshotButton.setContentDescription("Take screenshot");screenshotButton.setOnClickListener(v->screenshot());
         FrameLayout.LayoutParams screenshotParams=new FrameLayout.LayoutParams(dp(48),dp(48),Gravity.END|Gravity.CENTER_VERTICAL);screenshotParams.rightMargin=dp(18);root.addView(screenshotButton,screenshotParams);
         setContentView(root);
     }
@@ -558,6 +558,14 @@ public class PlayerActivity extends AppCompatActivity {
     private void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
     @Override protected void onPause(){savePosition();super.onPause();}
     @Override protected void onUserLeaveHint(){super.onUserLeaveHint();if(autoPip&&Build.VERSION.SDK_INT>=26&&player!=null&&player.isPlaying()&&!isInPictureInPictureMode())enterPip();}
+    @Override public void onPictureInPictureModeChanged(boolean inPictureInPictureMode, android.content.res.Configuration newConfig){
+        super.onPictureInPictureModeChanged(inPictureInPictureMode,newConfig);
+        if(inPictureInPictureMode){
+            top.setVisibility(View.GONE);bottom.setVisibility(View.GONE);((View)quickTools.getTag()).setVisibility(View.GONE);lock.setVisibility(View.GONE);screenshotButton.setVisibility(View.GONE);hint.setVisibility(View.GONE);
+        }else if(!locked){
+            int visibility=controls?View.VISIBLE:View.GONE;top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);screenshotButton.setVisibility(visibility);
+        }
+    }
     @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null&&player!=null){player.setEqualizer(null);cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
 }
