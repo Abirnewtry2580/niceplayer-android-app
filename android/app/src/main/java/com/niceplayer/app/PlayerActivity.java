@@ -376,16 +376,13 @@ public class PlayerActivity extends AppCompatActivity {
         background.setCornerRadius(dp(14));
         waveform.setBackground(background);
         waveform.setPadding(dp(8),dp(7),dp(8),dp(7));
+        waveform.setAlpha(1f);
+        waveform.setElevation(dp(30));
         waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
-        FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(72),Gravity.TOP|Gravity.START);
-        params.leftMargin=dp(24);params.rightMargin=dp(24);params.topMargin=dp(190);
+        int waveformWidth=Math.min(dp(360),getResources().getDisplayMetrics().widthPixels-dp(32));
+        FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(waveformWidth,dp(76),Gravity.TOP|Gravity.START);
         root.addView(waveform,params);
-        waveform.post(()->{
-            float maxX=Math.max(0,root.getWidth()-waveform.getWidth());
-            float maxY=Math.max(0,root.getHeight()-waveform.getHeight());
-            waveform.setX(preferences.getFloat("waveform_x_fraction",.5f)*maxX);
-            waveform.setY(preferences.getFloat("waveform_y_fraction",.62f)*maxY);
-        });
+        root.post(()->positionWaveformFromPreferences());
         waveform.setOnTouchListener((view,event)->{
             if(event.getActionMasked()==MotionEvent.ACTION_DOWN){
                 waveformDragStartX=event.getRawX();waveformDragStartY=event.getRawY();
@@ -406,6 +403,24 @@ public class PlayerActivity extends AppCompatActivity {
             }
             return false;
         });
+    }
+
+    private void positionWaveformFromPreferences(){
+        if(waveform==null||root.getWidth()==0||root.getHeight()==0)return;
+        float maxX=Math.max(0,root.getWidth()-waveform.getWidth());
+        float maxY=Math.max(0,root.getHeight()-waveform.getHeight());
+        float savedX=Math.max(0f,Math.min(1f,preferences.getFloat("waveform_x_fraction",.5f)));
+        float savedY=Math.max(0f,Math.min(1f,preferences.getFloat("waveform_y_fraction",.55f)));
+        waveform.setX(savedX*maxX);waveform.setY(savedY*maxY);
+    }
+
+    private void showWaveformOverlay(){
+        if(waveform==null)return;
+        waveform.setAlpha(1f);
+        waveform.setVisibility(View.VISIBLE);
+        waveform.bringToFront();
+        waveform.requestLayout();
+        root.post(()->{positionWaveformFromPreferences();waveform.bringToFront();waveform.invalidate();});
     }
 
     private TextView addControl(LinearLayout row,String text,int size,View.OnClickListener click){
@@ -504,8 +519,9 @@ public class PlayerActivity extends AppCompatActivity {
         waveformEnabled=!waveformEnabled;
         preferences.edit().putBoolean("waveform_enabled",waveformEnabled).apply();
         if(waveform==null)return;
-        waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
-        if(!waveformEnabled){waveform.setLevels(null);Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
+        if(!waveformEnabled){waveform.setVisibility(View.GONE);waveform.setLevels(null);Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
+        showWaveformOverlay();
+        Toast.makeText(this,"Audio waveform on",Toast.LENGTH_SHORT).show();
         resumeAfterWaveform=player.isPlaying();
         if(resumeAfterWaveform)player.pause();
         Toast.makeText(this,"Analyzing audio waveform…",Toast.LENGTH_SHORT).show();
