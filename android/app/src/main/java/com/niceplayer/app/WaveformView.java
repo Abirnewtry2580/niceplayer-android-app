@@ -43,7 +43,7 @@ public class WaveformView extends View {
         if (width <= 0 || height <= 0) return;
 
         if (levels.length == 0 || durationMs <= 0) {
-            paint.setColor(0x7792A5BC);
+            paint.setColor(0xCCFFFFFF);
             paint.setStrokeWidth(Math.max(2f, getResources().getDisplayMetrics().density * 2f));
             for (float x = 8; x < width; x += 12) canvas.drawCircle(x, centerY, 1.8f, paint);
             drawPlayhead(canvas, width, height);
@@ -52,7 +52,7 @@ public class WaveformView extends View {
 
         int columns = Math.max(24, Math.min(100, (int)(width / 5f)));
         float step = width / columns;
-        float stroke = Math.max(2f, step * .48f);
+        float stroke = Math.max(getResources().getDisplayMetrics().density * 3f, step * .68f);
         long windowStart = positionMs - WINDOW_SIDE_MS;
         long windowDuration = WINDOW_SIDE_MS * 2L;
 
@@ -64,13 +64,13 @@ public class WaveformView extends View {
             boolean past = sampleTime <= positionMs;
 
             if (level <= SILENCE_THRESHOLD || sampleTime < 0 || sampleTime > durationMs) {
-                paint.setColor(past ? 0xCC56C7FF : 0x887A8798);
+                paint.setColor(0xCCFFFFFF);
                 canvas.drawCircle(x, centerY, Math.max(1.5f, stroke * .38f), paint);
                 continue;
             }
 
             float half = Math.max(stroke, level * height * .43f);
-            paint.setColor(past ? 0xFF56C7FF : 0xFF8B98A8);
+            paint.setColor(Color.WHITE);
             paint.setStrokeWidth(stroke);
             canvas.drawLine(x, centerY - half, x, centerY + half, paint);
         }
