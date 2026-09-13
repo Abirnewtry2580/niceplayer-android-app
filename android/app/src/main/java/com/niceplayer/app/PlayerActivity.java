@@ -74,6 +74,7 @@ public class PlayerActivity extends AppCompatActivity {
     private MediaPlayer.Equalizer cleanupEqualizer;
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
     private long pointA = -1, pointB = -1, audioDelay, subtitleDelay;
+    private boolean resumeAfterWaveform;
     private float selectedRate = 1f;
     private AudioFocusRequest focusRequest;
     private final ActivityResultLauncher<String[]> subtitlePicker = registerForActivityResult(
@@ -136,6 +137,8 @@ public class PlayerActivity extends AppCompatActivity {
         ArrayList<String> options = new ArrayList<>();
         options.add("--audio-time-stretch");
         options.add("--avcodec-fast");
+        options.add("--drop-late-frames");
+        options.add("--skip-frames");
         options.add("--network-caching=1500");
         vlc = new LibVLC(this, options);
         player = new MediaPlayer(vlc);
@@ -151,7 +154,7 @@ public class PlayerActivity extends AppCompatActivity {
             finish();
             return;
         }
-        scheduleWaveform();
+        waveform.setLevels(null);
         handler.post(ticker);
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() { finish(); }
@@ -174,8 +177,6 @@ public class PlayerActivity extends AppCompatActivity {
                 media = new Media(vlc, sourceUri);
             }
             media.setHWDecoderEnabled(hardwareDecoder, hardwareDecoder);
-            media.addOption(":clock-jitter=0");
-            media.addOption(":clock-synchro=0");
             if (soundProtection > 0) {
                 media.addOption(":audio-filter=compressor,normvol");
                 media.addOption(":compressor-attack=" + (soundProtection == 1 ? "25" : soundProtection == 2 ? "10" : "5"));
@@ -270,7 +271,7 @@ public class PlayerActivity extends AppCompatActivity {
         title.setText(currentTitle());
         player.stop();
         startPlayback(true);
-        scheduleWaveform();
+        waveform.setLevels(null);
     }
 
     private void makeUi() {
@@ -330,8 +331,8 @@ public class PlayerActivity extends AppCompatActivity {
         root.addView(bottom,new FrameLayout.LayoutParams(-1,dp(147),Gravity.BOTTOM));
     }
 
-    private void loadWaveform(){if(waveform==null)return;waveform.setLevels(null);Uri uri=sourceUri;worker.execute(()->AudioWaveformExtractor.extract(this,uri,180,new AudioWaveformExtractor.Callback(){public void complete(float[] levels){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null)waveform.setLevels(levels);});}public void failed(){}}));}
-    private void scheduleWaveform(){if(waveform!=null)waveform.setLevels(null);handler.postDelayed(this::loadWaveform,2200);}
+    private void loadWaveform(){if(waveform==null)return;waveform.setLevels(null);Uri uri=sourceUri;worker.execute(()->AudioWaveformExtractor.extract(this,uri,180,new AudioWaveformExtractor.Callback(){public void complete(float[] levels){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null)waveform.setLevels(levels);finishWaveformAnalysis();});}public void failed(){runOnUiThread(()->{Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();});}}));}
+    private void finishWaveformAnalysis(){if(resumeAfterWaveform&&player!=null&&!player.isPlaying())player.play();resumeAfterWaveform=false;}
 
     private TextView addControl(LinearLayout row,String text,int size,View.OnClickListener click){TextView v=label(text,size);if(click!=null)v.setOnClickListener(click);row.addView(v,new LinearLayout.LayoutParams(0,dp(55),1));return v;}
 
@@ -400,9 +401,11 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,13,12,"Playback diagnostics");
         m.getMenu().add(0,16,13,"Subtitle appearance");
         m.getMenu().add(0,17,14,"Playlist");
-        if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,15,"Picture in picture");m.getMenu().add(0,15,16,"Auto pop-up: "+(autoPip?"On":"Off"));}
-        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 5:toggleMirror();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:syncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;}return true;});m.show();
+        m.getMenu().add(0,18,15,"Analyze audio waveform");
+        if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,16,"Picture in picture");m.getMenu().add(0,15,17,"Auto pop-up: "+(autoPip?"On":"Off"));}
+        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 5:toggleMirror();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:syncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;}return true;});m.show();
     }
+    private void analyzeWaveform(){resumeAfterWaveform=player.isPlaying();if(resumeAfterWaveform)player.pause();Toast.makeText(this,"Analyzing audio waveform…",Toast.LENGTH_SHORT).show();loadWaveform();}
     private void soundProtectionMenu(){
         String[] modes={"Off","Low","Medium","Strong"};
         new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Sudden sound protection").setSingleChoiceItems(modes,soundProtection,(dialog,which)->{
