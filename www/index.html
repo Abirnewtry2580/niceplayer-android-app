@@ -498,7 +498,16 @@
                 info.append(name, meta); row.append(thumb, info);
                 row.addEventListener('click', async () => {
                     const plugin = videoLibraryPlugin();
-                    if (plugin && plugin.playVideo) { await plugin.playVideo({ uri: item.uri, title: item.name }); return; }
+                    if (plugin && plugin.playVideo) {
+                        await plugin.playVideo({
+                            uri: item.uri,
+                            title: item.name,
+                            index: videos.indexOf(item),
+                            uris: videos.map(video => video.uri),
+                            titles: videos.map(video => video.name)
+                        });
+                        return;
+                    }
                     playlist = videos; currentIndex = videos.indexOf(item); closeLibraryHome(); loadVideo(currentIndex);
                 });
                 deviceVideoList.appendChild(row);
