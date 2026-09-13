@@ -55,7 +55,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LinearLayout top, bottom, quickTools;
     private SeekBar seek;
     private WaveformView waveform;
-    private TextView play, time, hint, lock, title;
+    private TextView play, time, hint, lock, title, screenshotButton;
     private boolean dragging, controls = true, locked, orientationLocked;
     private boolean softwareRetryAttempted;
     private Uri sourceUri;
@@ -162,7 +162,7 @@ public class PlayerActivity extends AppCompatActivity {
             finish();
             return;
         }
-        waveform.setLevels(null);
+        if(waveform!=null)waveform.setLevels(null);
         handler.post(ticker);
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() { finish(); }
@@ -280,7 +280,7 @@ public class PlayerActivity extends AppCompatActivity {
         player.stop();
         resetVideoZoom(false);
         startPlayback(true);
-        waveform.setLevels(null);
+        if(waveform!=null)waveform.setLevels(null);
     }
 
     private void makeUi() {
@@ -303,10 +303,13 @@ public class PlayerActivity extends AppCompatActivity {
         });
         View gestures = new View(this);
         gestures.setOnTouchListener((v,e) -> gesture(e, detector));
-        FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(-1,-1); gp.topMargin=dp(134); gp.bottomMargin=dp(150); root.addView(gestures,gp);
+        FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(-1,-1); gp.topMargin=dp(134); gp.bottomMargin=dp(118); root.addView(gestures,gp);
         makeTop();makeQuickTools();makeBottom();
         lock = label("🔓", 17);GradientDrawable lockBackground=new GradientDrawable();lockBackground.setShape(GradientDrawable.OVAL);lockBackground.setColor(0xCC111827);lock.setBackground(lockBackground);lock.setOnClickListener(v -> toggleLock());
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(52); root.addView(lock,lp);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(38); root.addView(lock,lp);
+        screenshotButton = topCircle("📷", 23);
+        GradientDrawable screenshotBackground=new GradientDrawable();screenshotBackground.setShape(GradientDrawable.OVAL);screenshotBackground.setColor(0x88000000);screenshotButton.setBackground(screenshotBackground);screenshotButton.setContentDescription("Take screenshot");screenshotButton.setOnClickListener(v->screenshot());
+        FrameLayout.LayoutParams screenshotParams=new FrameLayout.LayoutParams(dp(48),dp(48),Gravity.END|Gravity.CENTER_VERTICAL);screenshotParams.rightMargin=dp(18);root.addView(screenshotButton,screenshotParams);
         setContentView(root);
     }
 
@@ -317,7 +320,6 @@ public class PlayerActivity extends AppCompatActivity {
         title.setShadowLayer(dp(3),0,dp(1),Color.BLACK);title.setGravity(Gravity.START|Gravity.CENTER_VERTICAL); title.setSingleLine(true); title.setEllipsize(android.text.TextUtils.TruncateAt.END); top.addView(title,new LinearLayout.LayoutParams(0,dp(50),1));
         TextView speed=topCircle("1×",15); speed.setOnClickListener(v->speedMenu(speed)); top.addView(speed,topButtonParams(46));
         TextView ratio=topCircle("FIT",11); ratio.setOnClickListener(v->ratio(ratio)); top.addView(ratio,topButtonParams(46));
-        TextView shot=topCircle("▣",23); shot.setOnClickListener(v->screenshot()); top.addView(shot,topButtonParams(46));
         TextView rotate=topCircle("↻",25); rotate.setOnClickListener(v->rotate()); top.addView(rotate,topButtonParams(46));
         TextView more=topCircle("⋮",26); more.setOnClickListener(v->moreMenu(more)); top.addView(more,topButtonParams(46));
         root.addView(top,new FrameLayout.LayoutParams(-1,dp(60),Gravity.TOP));
@@ -325,17 +327,17 @@ public class PlayerActivity extends AppCompatActivity {
     private TextView topCircle(String text,int size){TextView view=label(text,size);view.setShadowLayer(dp(3),0,dp(1),Color.BLACK);view.setBackgroundColor(Color.TRANSPARENT);return view;}
     private LinearLayout.LayoutParams topButtonParams(int size){LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(size),dp(size));params.setMargins(dp(3),0,dp(3),0);return params;}
 
-    private void makeQuickTools(){android.widget.HorizontalScrollView scroll=new android.widget.HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);scroll.setBackgroundColor(0x75000000);quickTools=new LinearLayout(this);quickTools.setGravity(Gravity.CENTER_VERTICAL);quickTools.setPadding(dp(8),dp(5),dp(8),dp(5));
+    private void makeQuickTools(){android.widget.HorizontalScrollView scroll=new android.widget.HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);scroll.setBackgroundColor(Color.TRANSPARENT);quickTools=new LinearLayout(this);quickTools.setGravity(Gravity.CENTER_VERTICAL);quickTools.setPadding(dp(8),dp(5),dp(8),dp(5));
         addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());addQuick("↻\nROTATE",v->rotate());
         TextView rotationLock=addQuick("ROTATION\nLOCK",null);rotationLock.setOnClickListener(v->toggleOrientationLock(rotationLock));
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
     }
-    private TextView addQuick(String text,View.OnClickListener click){TextView v=label(text,10);v.setLines(2);v.setBackgroundColor(0x55334155);if(click!=null)v.setOnClickListener(click);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(76),dp(58));p.setMargins(dp(3),0,dp(3),0);quickTools.addView(v,p);return v;}
+    private TextView addQuick(String text,View.OnClickListener click){TextView v=label(text,9);v.setLines(2);GradientDrawable background=new GradientDrawable();background.setShape(GradientDrawable.OVAL);background.setColor(0x7A111827);v.setBackground(background);if(click!=null)v.setOnClickListener(click);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(58),dp(58));p.setMargins(dp(4),0,dp(4),0);quickTools.addView(v,p);return v;}
 
     private void makeBottom() {
         bottom=new LinearLayout(this); bottom.setOrientation(LinearLayout.VERTICAL); bottom.setPadding(dp(10),0,dp(10),dp(6)); bottom.setBackgroundColor(Color.TRANSPARENT);
-        waveform=new WaveformView(this);waveform.setOnSeekListener(f->{long length=player.getLength();if(length>0)player.setTime((long)(length*f));});bottom.addView(waveform,new LinearLayout.LayoutParams(-1,dp(38)));
+        waveform=null;
         seek=new SeekBar(this); seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             public void onStartTrackingTouch(SeekBar b){dragging=true;} public void onProgressChanged(SeekBar b,int n,boolean from){if(from)time.setText(clock(n)+"  /  "+clock(player.getLength()));}
             public void onStopTrackingTouch(SeekBar b){player.setTime(b.getProgress());dragging=false;}
@@ -347,7 +349,7 @@ public class PlayerActivity extends AppCompatActivity {
         addControl(row,"▶|",21,v->playAt(playlistIndex+1));
         bottom.addView(row,new LinearLayout.LayoutParams(-1,dp(55)));
         time=label("00:00  /  00:00",12); time.setShadowLayer(dp(3),0,dp(1),Color.BLACK);time.setGravity(Gravity.START|Gravity.CENTER_VERTICAL); bottom.addView(time,new LinearLayout.LayoutParams(-1,dp(24)));
-        root.addView(bottom,new FrameLayout.LayoutParams(-1,dp(147),Gravity.BOTTOM));
+        root.addView(bottom,new FrameLayout.LayoutParams(-1,dp(115),Gravity.BOTTOM));
     }
 
     private void loadWaveform(){if(waveform==null)return;waveform.setLevels(null);Uri uri=sourceUri;worker.execute(()->AudioWaveformExtractor.extract(this,uri,180,new AudioWaveformExtractor.Callback(){public void complete(float[] levels){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null)waveform.setLevels(levels);finishWaveformAnalysis();});}public void failed(){runOnUiThread(()->{Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();});}}));}
@@ -418,12 +420,12 @@ public class PlayerActivity extends AppCompatActivity {
         }
         controls=!controls;
         int visibility=controls?View.VISIBLE:View.GONE;
-        top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);
+        top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);screenshotButton.setVisibility(visibility);
     }
     private void toggleLock(){
         locked=!locked;handler.removeCallbacks(hideLockButton);lock.setText(locked?"🔒":"🔓");
-        if(locked){top.setVisibility(View.GONE);bottom.setVisibility(View.GONE);((View)quickTools.getTag()).setVisibility(View.GONE);lock.setVisibility(View.VISIBLE);controls=false;handler.postDelayed(hideLockButton,2200);}
-        else{top.setVisibility(View.VISIBLE);bottom.setVisibility(View.VISIBLE);((View)quickTools.getTag()).setVisibility(View.VISIBLE);lock.setVisibility(View.VISIBLE);controls=true;}
+        if(locked){top.setVisibility(View.GONE);bottom.setVisibility(View.GONE);((View)quickTools.getTag()).setVisibility(View.GONE);screenshotButton.setVisibility(View.GONE);lock.setVisibility(View.VISIBLE);controls=false;handler.postDelayed(hideLockButton,2200);}
+        else{top.setVisibility(View.VISIBLE);bottom.setVisibility(View.VISIBLE);((View)quickTools.getTag()).setVisibility(View.VISIBLE);screenshotButton.setVisibility(View.VISIBLE);lock.setVisibility(View.VISIBLE);controls=true;}
     }
     private void moreMenu(TextView anchor){
         PopupMenu m=new PopupMenu(this,anchor);
