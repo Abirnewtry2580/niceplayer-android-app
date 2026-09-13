@@ -36,8 +36,9 @@ import java.util.Collections;
 import java.util.List;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @CapacitorPlugin(
     name = "VideoLibrary",
@@ -47,7 +48,8 @@ import java.util.concurrent.Executors;
     }
 )
 public class VideoLibraryPlugin extends Plugin {
-    private final ExecutorService thumbnailWorker = Executors.newFixedThreadPool(2);
+    private final ThreadPoolExecutor thumbnailWorker = new ThreadPoolExecutor(
+            1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
     private ActivityResultLauncher<IntentSenderRequest> mutationLauncher;
     private PluginCall pendingMutationCall;
     private String pendingMutationType;
@@ -151,6 +153,8 @@ public class VideoLibraryPlugin extends Plugin {
     public void playVideo(PluginCall call) {
         String uri = call.getString("uri");
         if (uri == null || uri.trim().isEmpty()) { call.reject("uri is required"); return; }
+        // Do not let queued thumbnail decoding compete with the video decoder.
+        thumbnailWorker.getQueue().clear();
         Intent intent = new Intent(getContext(), PlayerActivity.class);
         intent.setData(Uri.parse(uri));
         intent.putExtra("title", call.getString("title", "Video"));
