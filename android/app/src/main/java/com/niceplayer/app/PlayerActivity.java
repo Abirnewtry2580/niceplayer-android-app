@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.*;
 import android.provider.MediaStore;
+import android.util.Log;
 import android.view.*;
 import android.widget.*;
 import androidx.activity.OnBackPressedCallback;
@@ -16,10 +17,12 @@ import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
 import org.videolan.libvlc.util.VLCVideoLayout;
 import java.io.OutputStream;
+import java.io.FileNotFoundException;
 import java.util.*;
 
 /** Native VLC player: bundled decoders, no WebView playback dependency. */
 public class PlayerActivity extends AppCompatActivity {
+    private static final String TAG = "NicePlayer";
     private static final long TEN_SECONDS = 10_000L;
     private LibVLC vlc;
     private MediaPlayer player;
@@ -29,6 +32,9 @@ public class PlayerActivity extends AppCompatActivity {
     private SeekBar seek;
     private TextView play, time, hint, lock;
     private boolean dragging, controls = true, locked;
+    private boolean softwareRetryAttempted;
+    private Uri sourceUri;
+    private ParcelFileDescriptor sourceDescriptor;
     private float downX;
     private long downTime;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -48,8 +54,8 @@ public class PlayerActivity extends AppCompatActivity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        Uri uri = getIntent().getData();
-        if (uri == null) { finish(); return; }
+        sourceUri = getIntent().getData();
+        if (sourceUri == null) { finish(); return; }
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         immersive();
         ArrayList<String> options = new ArrayList<>();
@@ -61,17 +67,62 @@ public class PlayerActivity extends AppCompatActivity {
         makeUi();
         player.attachViews(video, null, false, false);
         player.setEventListener(e -> runOnUiThread(() -> {
-            if (e.type == MediaPlayer.Event.EncounteredError)
-                Toast.makeText(this, "Could not decode this file", Toast.LENGTH_LONG).show();
+            if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
         }));
-        Media media = new Media(vlc, uri);
-        media.setHWDecoderEnabled(true, false);
-        media.addOption(":clock-jitter=0");
-        player.setMedia(media); media.release(); player.play();
+        if (!startPlayback(true)) {
+            Toast.makeText(this, "Could not open this video", Toast.LENGTH_LONG).show();
+            finish();
+            return;
+        }
         handler.post(ticker);
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() { finish(); }
         });
+    }
+
+    /**
+     * MediaStore content URIs are opened as a file descriptor. Passing the URI directly to
+     * LibVLC works on some phones, but fails on others even though this app owns permission.
+     */
+    private boolean startPlayback(boolean hardwareDecoder) {
+        closeSourceDescriptor();
+        try {
+            Media media;
+            if ("content".equalsIgnoreCase(sourceUri.getScheme())) {
+                sourceDescriptor = getContentResolver().openFileDescriptor(sourceUri, "r");
+                if (sourceDescriptor == null) throw new FileNotFoundException("Null video descriptor");
+                media = new Media(vlc, sourceDescriptor.getFileDescriptor());
+            } else {
+                media = new Media(vlc, sourceUri);
+            }
+            media.setHWDecoderEnabled(hardwareDecoder, hardwareDecoder);
+            media.addOption(":clock-jitter=0");
+            media.addOption(":clock-synchro=0");
+            player.setMedia(media);
+            media.release();
+            player.play();
+            return true;
+        } catch (Exception error) {
+            Log.e(TAG, "Unable to open video " + sourceUri, error);
+            closeSourceDescriptor();
+            return false;
+        }
+    }
+
+    private void handlePlaybackError() {
+        if (!softwareRetryAttempted) {
+            softwareRetryAttempted = true;
+            Toast.makeText(this, "Hardware decoder failed. Trying compatible mode…", Toast.LENGTH_SHORT).show();
+            player.stop();
+            if (startPlayback(false)) return;
+        }
+        Toast.makeText(this, "This video is damaged or uses an unsupported codec", Toast.LENGTH_LONG).show();
+    }
+
+    private void closeSourceDescriptor() {
+        if (sourceDescriptor == null) return;
+        try { sourceDescriptor.close(); } catch (Exception ignored) {}
+        sourceDescriptor = null;
     }
 
     private void makeUi() {
@@ -143,6 +194,6 @@ public class PlayerActivity extends AppCompatActivity {
     private void screenshot(){if(Build.VERSION.SDK_INT<26){Toast.makeText(this,"Android 8 or newer required",Toast.LENGTH_SHORT).show();return;}Bitmap b=Bitmap.createBitmap(root.getWidth(),root.getHeight(),Bitmap.Config.ARGB_8888);PixelCopy.request(getWindow(),b,r->{if(r==PixelCopy.SUCCESS)save(b);else{b.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}},handler);}
     private void save(Bitmap b){try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"NicePlayer_"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/NicePlayer");Uri u=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(u==null)throw new Exception();try(OutputStream s=getContentResolver().openOutputStream(u)){if(s==null||!b.compress(Bitmap.CompressFormat.JPEG,94,s))throw new Exception();}Toast.makeText(this,"Screenshot saved",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Could not save screenshot",Toast.LENGTH_LONG).show();}finally{b.recycle();}}
     private void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
-    @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);if(player!=null){player.stop();player.detachViews();player.release();player=null;}if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
+    @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
 }
