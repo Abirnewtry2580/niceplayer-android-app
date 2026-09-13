@@ -514,8 +514,7 @@
             videos.forEach(item => {
                 const row = document.createElement('div'); row.className = 'video-row';
                 const thumb = document.createElement('div'); thumb.className = 'video-thumb';
-                if (item.thumbnail) { const image = document.createElement('img'); image.src = item.thumbnail; image.alt = ''; thumb.appendChild(image); }
-                else { thumb.textContent = '▶'; }
+                thumb.textContent = '▶';
                 if (item.duration) { const badge = document.createElement('span'); badge.className = 'thumb-duration'; badge.textContent = formatTime(item.duration / 1000); thumb.appendChild(badge); }
                 const info = document.createElement('div'); info.className = 'video-info';
                 const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
@@ -537,7 +536,15 @@
                     playlist = videos; currentIndex = videos.indexOf(item); closeLibraryHome(); loadVideo(currentIndex);
                 });
                 deviceVideoList.appendChild(row);
+                lazyThumbnail(item,thumb);
             });
+        }
+
+        const thumbnailObserver=('IntersectionObserver' in window)?new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){thumbnailObserver.unobserve(entry.target);loadRowThumbnail(entry.target);}}),{rootMargin:'180px'}):null;
+        function lazyThumbnail(item,element){element.dataset.uri=item.uri;if(thumbnailObserver)thumbnailObserver.observe(element);else setTimeout(()=>loadRowThumbnail(element),50);}
+        async function loadRowThumbnail(element){
+            const uri=element.dataset.uri,plugin=videoLibraryPlugin();if(!uri||!plugin||!plugin.getThumbnail||!element.isConnected)return;
+            try{const result=await plugin.getThumbnail({uri});if(!element.isConnected||element.dataset.uri!==uri||!result.thumbnail)return;const image=document.createElement('img');image.src=result.thumbnail;image.alt='';Array.from(element.childNodes).filter(node=>node.nodeType===3).forEach(node=>node.remove());element.prepend(image);}catch(error){}
         }
 
         function showMediaActions(kind,item){
