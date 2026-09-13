@@ -4,6 +4,8 @@ import android.Manifest;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.app.Activity;
+import android.app.PendingIntent;
 import android.graphics.Bitmap;
 import android.util.Size;
 import android.database.Cursor;
@@ -22,10 +24,16 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
+import androidx.activity.ComponentActivity;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.IntentSenderRequest;
+import androidx.activity.result.contract.ActivityResultContracts;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 
@@ -37,6 +45,104 @@ import java.io.ByteArrayOutputStream;
     }
 )
 public class VideoLibraryPlugin extends Plugin {
+    private ActivityResultLauncher<IntentSenderRequest> mutationLauncher;
+    private PluginCall pendingMutationCall;
+    private String pendingMutationType;
+    private String pendingMutationName;
+    private String pendingRelativePath;
+    private List<Uri> pendingMutationUris;
+
+    @Override
+    public void load() {
+        mutationLauncher = ((ComponentActivity) getActivity()).registerForActivityResult(
+                new ActivityResultContracts.StartIntentSenderForResult(), result -> {
+                    PluginCall call = pendingMutationCall;
+                    if (call == null) return;
+                    if (result.getResultCode() != Activity.RESULT_OK) {
+                        clearPendingMutation(); call.reject("Operation cancelled"); return;
+                    }
+                    try {
+                        if (!"deleteVideo".equals(pendingMutationType) && !"deleteFolder".equals(pendingMutationType)) performMutation();
+                        JSObject response = new JSObject(); response.put("success", true); call.resolve(response);
+                    } catch (Exception error) { call.reject("Could not update media", error); }
+                    clearPendingMutation();
+                });
+    }
+
+    @PluginMethod
+    public void renameVideo(PluginCall call) { startFileMutation(call, "renameVideo"); }
+
+    @PluginMethod
+    public void deleteVideo(PluginCall call) { startFileMutation(call, "deleteVideo"); }
+
+    private void startFileMutation(PluginCall call, String type) {
+        String rawUri = call.getString("uri"), name = call.getString("name");
+        if (rawUri == null) { call.reject("uri is required"); return; }
+        if ("renameVideo".equals(type) && !validName(name)) { call.reject("A valid name is required"); return; }
+        requestMutation(call, type, Collections.singletonList(Uri.parse(rawUri)), name, null);
+    }
+
+    @PluginMethod
+    public void renameFolder(PluginCall call) {
+        String bucketId = call.getString("bucketId"), name = call.getString("name");
+        if (bucketId == null || !validName(name)) { call.reject("Folder and a valid name are required"); return; }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) { call.reject("Folder rename requires Android 10 or newer"); return; }
+        FolderMedia media = folderMedia(bucketId);
+        if (media.uris.isEmpty() || media.relativePath == null) { call.reject("Folder is empty or unavailable"); return; }
+        String path = media.relativePath.endsWith("/") ? media.relativePath.substring(0, media.relativePath.length()-1) : media.relativePath;
+        int slash = path.lastIndexOf('/');
+        String renamedPath = (slash >= 0 ? path.substring(0, slash + 1) : "") + name.trim() + "/";
+        requestMutation(call, "renameFolder", media.uris, name.trim(), renamedPath);
+    }
+
+    @PluginMethod
+    public void deleteFolder(PluginCall call) {
+        String bucketId = call.getString("bucketId");
+        if (bucketId == null) { call.reject("bucketId is required"); return; }
+        List<Uri> uris = folderMedia(bucketId).uris;
+        if (uris.isEmpty()) { call.reject("Folder is empty or unavailable"); return; }
+        requestMutation(call, "deleteFolder", uris, null, null);
+    }
+
+    private boolean validName(String name) { return name != null && !name.trim().isEmpty() && !name.contains("/") && !name.contains("\\"); }
+
+    private void requestMutation(PluginCall call, String type, List<Uri> uris, String name, String relativePath) {
+        if (pendingMutationCall != null) { call.reject("Another file operation is in progress"); return; }
+        pendingMutationCall=call;pendingMutationType=type;pendingMutationUris=uris;pendingMutationName=name;pendingRelativePath=relativePath;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                PendingIntent consent = (type.startsWith("delete"))
+                        ? MediaStore.createDeleteRequest(getContext().getContentResolver(), uris)
+                        : MediaStore.createWriteRequest(getContext().getContentResolver(), uris);
+                mutationLauncher.launch(new IntentSenderRequest.Builder(consent.getIntentSender()).build());
+            } else {
+                performMutation(); JSObject response=new JSObject();response.put("success",true);call.resolve(response);clearPendingMutation();
+            }
+        } catch (Exception error) { clearPendingMutation(); call.reject("Could not request media permission", error); }
+    }
+
+    private void performMutation() {
+        ContentResolver resolver=getContext().getContentResolver();
+        if (pendingMutationType.startsWith("delete")) { for(Uri uri:pendingMutationUris) resolver.delete(uri,null,null); return; }
+        for(Uri uri:pendingMutationUris) {
+            ContentValues values=new ContentValues();
+            if ("renameVideo".equals(pendingMutationType)) values.put(MediaStore.Video.Media.DISPLAY_NAME,pendingMutationName.trim());
+            else values.put(MediaStore.Video.Media.RELATIVE_PATH,pendingRelativePath);
+            resolver.update(uri,values,null,null);
+        }
+    }
+
+    private FolderMedia folderMedia(String bucketId) {
+        FolderMedia result=new FolderMedia();String[] projection={MediaStore.Video.Media._ID,MediaStore.Video.Media.RELATIVE_PATH};
+        try(Cursor cursor=getContext().getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,projection,MediaStore.Video.Media.BUCKET_ID+"=?",new String[]{bucketId},null)){
+            if(cursor!=null){int id=cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID),path=cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH);while(cursor.moveToNext()){result.uris.add(Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,String.valueOf(cursor.getLong(id))));if(result.relativePath==null&&path>=0)result.relativePath=cursor.getString(path);}}
+        } catch(Exception ignored){}
+        return result;
+    }
+
+    private void clearPendingMutation(){pendingMutationCall=null;pendingMutationType=null;pendingMutationUris=null;pendingMutationName=null;pendingRelativePath=null;}
+
+    private static class FolderMedia { final List<Uri> uris=new ArrayList<>(); String relativePath; }
 
     @PluginMethod
     public void playVideo(PluginCall call) {
