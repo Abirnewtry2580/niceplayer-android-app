@@ -55,6 +55,9 @@ public class PlayerActivity extends AppCompatActivity {
     private long lastPositionSave;
     private long downTime;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable hideLockButton = () -> {
+        if (locked && lock != null) lock.setVisibility(View.GONE);
+    };
 
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
@@ -276,8 +279,22 @@ public class PlayerActivity extends AppCompatActivity {
     private void speedMenu(TextView anchor){PopupMenu m=new PopupMenu(this,anchor);float[] s={.25f,.5f,.75f,1f,1.25f,1.5f,2f};for(int i=0;i<s.length;i++)m.getMenu().add(0,i,i,s[i]+"×");m.setOnMenuItemClickListener(x->{float n=s[x.getItemId()];player.setRate(n);anchor.setText(n==1f?"1×":n+"×");return true;});m.show();}
     private int ratioMode;
     private void ratio(TextView v){ratioMode=(ratioMode+1)%3;if(ratioMode==0){player.setAspectRatio(null);player.setScale(0);v.setText("FIT");}else if(ratioMode==1){player.setAspectRatio("16:9");player.setScale(0);v.setText("16:9");}else{player.setAspectRatio(null);player.setScale(1.35f);v.setText("ZOOM");}}
-    private void toggleControls(){if(locked)return;controls=!controls;top.setVisibility(controls?View.VISIBLE:View.GONE);bottom.setVisibility(controls?View.VISIBLE:View.GONE);}
-    private void toggleLock(){locked=!locked;lock.setText(locked?"UNLOCK":"LOCK");top.setVisibility(locked?View.GONE:View.VISIBLE);bottom.setVisibility(locked?View.GONE:View.VISIBLE);controls=!locked;}
+    private void toggleControls(){
+        if(locked){
+            lock.setVisibility(lock.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);
+            handler.removeCallbacks(hideLockButton);
+            if(lock.getVisibility()==View.VISIBLE)handler.postDelayed(hideLockButton,2200);
+            return;
+        }
+        controls=!controls;
+        int visibility=controls?View.VISIBLE:View.GONE;
+        top.setVisibility(visibility);bottom.setVisibility(visibility);lock.setVisibility(visibility);
+    }
+    private void toggleLock(){
+        locked=!locked;handler.removeCallbacks(hideLockButton);lock.setText(locked?"UNLOCK":"LOCK");
+        if(locked){top.setVisibility(View.GONE);bottom.setVisibility(View.GONE);lock.setVisibility(View.VISIBLE);controls=false;handler.postDelayed(hideLockButton,2200);}
+        else{top.setVisibility(View.VISIBLE);bottom.setVisibility(View.VISIBLE);lock.setVisibility(View.VISIBLE);controls=true;}
+    }
     private void moreMenu(TextView anchor){
         PopupMenu m=new PopupMenu(this,anchor);
         m.getMenu().add(0,1,0,"Audio track");
