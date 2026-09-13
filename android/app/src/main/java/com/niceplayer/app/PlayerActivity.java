@@ -287,8 +287,8 @@ public class PlayerActivity extends AppCompatActivity {
         gestures.setOnTouchListener((v,e) -> gesture(e, detector));
         FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(-1,-1); gp.topMargin=dp(134); gp.bottomMargin=dp(150); root.addView(gestures,gp);
         makeTop();makeQuickTools();makeBottom();
-        lock = label("LOCK", 11); lock.setBackgroundColor(0xAA111827); lock.setOnClickListener(v -> toggleLock());
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(62),dp(44),Gravity.START|Gravity.CENTER_VERTICAL); lp.leftMargin=dp(8); root.addView(lock,lp);
+        lock = label("🔒", 20); lock.setBackgroundColor(0xAA111827); lock.setOnClickListener(v -> toggleLock());
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(52),dp(48),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(48); root.addView(lock,lp);
         setContentView(root);
     }
 
@@ -378,7 +378,7 @@ public class PlayerActivity extends AppCompatActivity {
         top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);
     }
     private void toggleLock(){
-        locked=!locked;handler.removeCallbacks(hideLockButton);lock.setText(locked?"UNLOCK":"LOCK");
+        locked=!locked;handler.removeCallbacks(hideLockButton);lock.setText(locked?"🔓":"🔒");
         if(locked){top.setVisibility(View.GONE);bottom.setVisibility(View.GONE);((View)quickTools.getTag()).setVisibility(View.GONE);lock.setVisibility(View.VISIBLE);controls=false;handler.postDelayed(hideLockButton,2200);}
         else{top.setVisibility(View.VISIBLE);bottom.setVisibility(View.VISIBLE);((View)quickTools.getTag()).setVisibility(View.VISIBLE);lock.setVisibility(View.VISIBLE);controls=true;}
     }
@@ -400,7 +400,7 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,16,13,"Subtitle appearance");
         m.getMenu().add(0,17,14,"Playlist");
         if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,15,"Picture in picture");m.getMenu().add(0,15,16,"Auto pop-up: "+(autoPip?"On":"Off"));}
-        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 5:video.setScaleX(video.getScaleX()<0?1f:-1f);break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:syncMenu();break;case 11:abRepeatMenu();break;case 12:player.nextFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;}return true;});m.show();
+        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 5:video.setScaleX(video.getScaleX()<0?1f:-1f);break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:syncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;}return true;});m.show();
     }
     private void soundProtectionMenu(){
         String[] modes={"Off","Low","Medium","Strong"};
@@ -411,13 +411,14 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void audioCleanupMenu(){String[] modes={"Off","Low","Medium","High"};new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Real-time audio cleanup").setSingleChoiceItems(modes,audioCleanup,(d,n)->{audioCleanup=n;preferences.edit().putInt("audio_cleanup",n).apply();applyAudioCleanup();d.dismiss();Toast.makeText(this,"Audio cleanup: "+modes[n],Toast.LENGTH_SHORT).show();}).show();}
     private void applyAudioCleanup(){
-        if(cleanupEqualizer!=null){cleanupEqualizer.release();cleanupEqualizer=null;}
+        if(cleanupEqualizer!=null){player.setEqualizer(null);cleanupEqualizer=null;}
         if(audioCleanup==0){player.setEqualizer(null);return;}
         cleanupEqualizer=MediaPlayer.Equalizer.create();float strength=audioCleanup==1?.45f:audioCleanup==2?.72f:1f;cleanupEqualizer.setPreAmp(-2f*strength);
         for(int i=0;i<MediaPlayer.Equalizer.getBandCount();i++){float hz=MediaPlayer.Equalizer.getBandFrequency(i);float gain=hz<140?-8f:hz>7500?-6f:(hz>=700&&hz<=4200?4.5f:0f);cleanupEqualizer.setAmp(i,gain*strength);}
         player.setEqualizer(cleanupEqualizer);
     }
     private void toggleHeadphoneSafety(){headphoneSafety=!headphoneSafety;preferences.edit().putBoolean("headphone_safety",headphoneSafety).apply();Toast.makeText(this,"Headphone safety: "+(headphoneSafety?"On":"Off"),Toast.LENGTH_SHORT).show();if(headphoneSafety)applySafeStart();}
+    private void stepFrame(){if(player.isPlaying())player.pause();player.setTime(Math.max(0,player.getTime()+40));}
     private void syncMenu(){
         String[] items={"Audio −50 ms","Audio +50 ms","Subtitle −100 ms","Subtitle +100 ms","Reset synchronization"};
         new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Audio / subtitle sync").setItems(items,(d,n)->{if(n==0)audioDelay-=50000;else if(n==1)audioDelay+=50000;else if(n==2)subtitleDelay-=100000;else if(n==3)subtitleDelay+=100000;else{audioDelay=0;subtitleDelay=0;}player.setAudioDelay(audioDelay);player.setSpuDelay(subtitleDelay);Toast.makeText(this,"Audio "+audioDelay/1000+" ms · Subtitle "+subtitleDelay/1000+" ms",Toast.LENGTH_SHORT).show();}).show();
@@ -469,6 +470,6 @@ public class PlayerActivity extends AppCompatActivity {
     private void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
     @Override protected void onPause(){savePosition();super.onPause();}
     @Override protected void onUserLeaveHint(){super.onUserLeaveHint();if(autoPip&&Build.VERSION.SDK_INT>=26&&player!=null&&player.isPlaying()&&!isInPictureInPictureMode())enterPip();}
-    @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null){cleanupEqualizer.release();cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
+    @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null&&player!=null){player.setEqualizer(null);cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
 }
