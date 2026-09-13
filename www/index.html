@@ -128,6 +128,14 @@
         .history-card { min-width:170px; max-width:170px; padding:11px; border:1px solid rgba(34,211,238,.18); border-radius:14px; color:#fff; background:rgba(8,145,178,.1); text-align:left; }
         .history-name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11px; font-weight:700; }
         .folder-star { position:absolute; z-index:2; right:10px; bottom:10px; font-size:17px; color:#facc15; }
+        .item-menu { position:absolute; z-index:3; right:7px; top:7px; width:38px; height:38px; border:0; border-radius:12px; color:#fff; background:rgba(2,6,23,.68); font-size:23px; }
+        .video-row { position:relative; }
+        .video-row .item-menu { position:static; flex:0 0 40px; }
+        .action-shade { position:fixed; z-index:1000; inset:0; display:flex; align-items:flex-end; background:rgba(0,0,0,.68); }
+        .action-sheet { width:100%; padding:18px 16px 24px; border-radius:24px 24px 0 0; background:#111827; box-shadow:0 -15px 45px rgba(0,0,0,.4); }
+        .action-title { margin:0 5px 13px; overflow:hidden; color:#e2e8f0; font-weight:750; white-space:nowrap; text-overflow:ellipsis; }
+        .action-sheet button { width:100%; margin:5px 0; padding:14px; border:0; border-radius:14px; color:#fff; background:#263247; font-size:15px; }
+        .action-sheet .danger { color:#fecaca; background:#451a1a; }
         .folder-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
         .folder-card { position:relative; overflow:hidden; min-height:122px; padding:16px; border:1px solid rgba(255,255,255,.09); border-radius:19px; text-align:left; color:#fff; background:linear-gradient(145deg,rgba(30,41,59,.84),rgba(15,23,42,.64)); box-shadow:0 13px 36px rgba(0,0,0,.23); }
         .folder-card::after { content:''; position:absolute; width:78px; height:78px; right:-22px; top:-24px; border-radius:50%; background:rgba(34,211,238,.12); filter:blur(2px); }
@@ -474,8 +482,9 @@
                 const name = document.createElement('div'); name.className = 'folder-name'; name.textContent = folder.name;
                 const count = document.createElement('div'); count.className = 'folder-count'; count.textContent = folder.count + ' videos';
                 const star=document.createElement('span');star.className='folder-star';star.textContent=favorites.includes(folder.bucketId)?'★':'☆';star.addEventListener('click',event=>{event.stopPropagation();toggleFolderFavorite(folder.bucketId);});
-                card.append(icon, name, count,star); card.addEventListener('click', () => showFolderVideos(folder));
-                card.addEventListener('contextmenu',event=>{event.preventDefault();toggleFolderHidden(folder.bucketId);});
+                const menu=document.createElement('button');menu.className='item-menu';menu.textContent='⋮';menu.addEventListener('click',event=>{event.stopPropagation();showMediaActions('folder',folder);});
+                card.append(icon, name, count,star,menu); card.addEventListener('click', () => showFolderVideos(folder));
+                card.addEventListener('contextmenu',event=>{event.preventDefault();showMediaActions('folder',folder);});
                 folderGrid.appendChild(card);
             });
         }
@@ -511,7 +520,8 @@
                 const info = document.createElement('div'); info.className = 'video-info';
                 const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
                 const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size) + (item.duration ? ' · ' + formatTime(item.duration / 1000) : '')+(duplicateCount[item.name+'|'+item.size]>1?' · Possible duplicate':'');
-                info.append(name, meta); row.append(thumb, info);
+                const menu=document.createElement('button');menu.className='item-menu';menu.textContent='⋮';menu.addEventListener('click',event=>{event.stopPropagation();showMediaActions('video',item);});
+                info.append(name, meta); row.append(thumb, info,menu);
                 row.addEventListener('click', async () => {
                     const plugin = videoLibraryPlugin();
                     if (plugin && plugin.playVideo) {
@@ -528,6 +538,27 @@
                 });
                 deviceVideoList.appendChild(row);
             });
+        }
+
+        function showMediaActions(kind,item){
+            const shade=document.createElement('div');shade.className='action-shade';
+            const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><button data-action="rename">Rename</button><button class="danger" data-action="delete">Delete</button><button data-action="cancel">Cancel</button>';
+            sheet.querySelector('.action-title').textContent=item.name;shade.appendChild(sheet);document.body.appendChild(shade);
+            shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')shade.remove();});
+            sheet.querySelector('[data-action="rename"]').onclick=()=>{shade.remove();renameMedia(kind,item);};
+            sheet.querySelector('[data-action="delete"]').onclick=()=>{shade.remove();deleteMedia(kind,item);};
+        }
+        async function renameMedia(kind,item){
+            const next=prompt('New '+kind+' name',item.name);if(!next||next.trim()===item.name)return;
+            const plugin=videoLibraryPlugin();if(!plugin)return;
+            try{if(kind==='video')await plugin.renameVideo({uri:item.uri,name:next.trim()});else await plugin.renameFolder({bucketId:item.bucketId,name:next.trim()});await scanDeviceVideos();if(kind==='video'&&currentFolder)await showFolderVideos(currentFolder);}
+            catch(error){alert('Rename failed or permission was denied.');}
+        }
+        async function deleteMedia(kind,item){
+            const warning=kind==='folder'?'Delete this folder and all '+item.count+' videos? This cannot be undone.':'Delete this video permanently? This cannot be undone.';if(!confirm(warning))return;
+            const plugin=videoLibraryPlugin();if(!plugin)return;
+            try{if(kind==='video')await plugin.deleteVideo({uri:item.uri});else await plugin.deleteFolder({bucketId:item.bucketId});await scanDeviceVideos();if(kind==='video'&&currentFolder)await showFolderVideos(currentFolder);}
+            catch(error){alert('Delete failed or permission was denied.');}
         }
 
         function filterLibrary(query) {
