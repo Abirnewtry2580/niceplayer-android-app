@@ -79,6 +79,8 @@ public class PlayerActivity extends AppCompatActivity {
     private float equalizerPreamp;
     private float[] equalizerGains;
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
+    private boolean waveformEnabled;
+    private float waveformDragStartX, waveformDragStartY, waveformStartX, waveformStartY;
     private long pointA = -1, pointB = -1, audioDelay, subtitleDelay;
     private boolean resumeAfterWaveform;
     private float selectedRate = 1f;
@@ -99,7 +101,7 @@ public class PlayerActivity extends AppCompatActivity {
                 long length = Math.max(0, player.getLength()), now = Math.max(0, player.getTime());
                 seek.setMax((int)Math.min(Integer.MAX_VALUE, length));
                 seek.setProgress((int)Math.min(Integer.MAX_VALUE, now));
-                if(waveform!=null&&length>0)waveform.setProgressFraction(now/(float)length);
+                if(waveform!=null&&waveformEnabled&&length>0)waveform.setTimeline(now,length);
                 time.setText(clock(now) + "  /  " + clock(length));
                 play.setText(player.isPlaying() ? "Ⅱ" : "▶");
                 if (player.isPlaying() && now - lastPositionSave > 5000) {
@@ -132,6 +134,7 @@ public class PlayerActivity extends AppCompatActivity {
         subtitleStyle = preferences.getInt("subtitle_style", 0);
         headphoneSafety = preferences.getBoolean("headphone_safety", true);
         autoPip = preferences.getBoolean("auto_pip", true);
+        waveformEnabled = preferences.getBoolean("waveform_enabled", false);
         selectedRate = preferences.getFloat("playback_rate", 1f);
         ratioMode = preferences.getInt("ratio_mode", 0);
         audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
@@ -163,6 +166,7 @@ public class PlayerActivity extends AppCompatActivity {
             return;
         }
         if(waveform!=null)waveform.setLevels(null);
+        if(waveformEnabled)handler.postDelayed(this::loadWaveform,500);
         handler.post(ticker);
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() { finish(); }
@@ -281,6 +285,7 @@ public class PlayerActivity extends AppCompatActivity {
         resetVideoZoom(false);
         startPlayback(true);
         if(waveform!=null)waveform.setLevels(null);
+        if(waveformEnabled)handler.postDelayed(this::loadWaveform,500);
     }
 
     private void makeUi() {
@@ -304,7 +309,7 @@ public class PlayerActivity extends AppCompatActivity {
         View gestures = new View(this);
         gestures.setOnTouchListener((v,e) -> gesture(e, detector));
         FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(-1,-1); gp.topMargin=dp(134); gp.bottomMargin=dp(118); root.addView(gestures,gp);
-        makeTop();makeQuickTools();makeBottom();
+        makeTop();makeQuickTools();makeBottom();createFloatingWaveform();
         lock = label("🔓", 17);GradientDrawable lockBackground=new GradientDrawable();lockBackground.setShape(GradientDrawable.OVAL);lockBackground.setColor(0xCC111827);lock.setBackground(lockBackground);lock.setOnClickListener(v -> toggleLock());
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(38); root.addView(lock,lp);
         screenshotButton = topCircle("📷", 23);
@@ -337,7 +342,6 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void makeBottom() {
         bottom=new LinearLayout(this); bottom.setOrientation(LinearLayout.VERTICAL); bottom.setPadding(dp(10),0,dp(10),dp(6)); bottom.setBackgroundColor(Color.TRANSPARENT);
-        waveform=null;
         seek=new SeekBar(this); seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             public void onStartTrackingTouch(SeekBar b){dragging=true;} public void onProgressChanged(SeekBar b,int n,boolean from){if(from)time.setText(clock(n)+"  /  "+clock(player.getLength()));}
             public void onStopTrackingTouch(SeekBar b){player.setTime(b.getProgress());dragging=false;}
@@ -352,8 +356,57 @@ public class PlayerActivity extends AppCompatActivity {
         root.addView(bottom,new FrameLayout.LayoutParams(-1,dp(115),Gravity.BOTTOM));
     }
 
-    private void loadWaveform(){if(waveform==null)return;waveform.setLevels(null);Uri uri=sourceUri;worker.execute(()->AudioWaveformExtractor.extract(this,uri,180,new AudioWaveformExtractor.Callback(){public void complete(float[] levels){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null)waveform.setLevels(levels);finishWaveformAnalysis();});}public void failed(){runOnUiThread(()->{Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();});}}));}
+    private void loadWaveform(){
+        if(waveform==null||!waveformEnabled)return;
+        waveform.setLevels(null);
+        Uri uri=sourceUri;
+        long duration=Math.max(0,player.getLength());
+        int buckets=(int)Math.max(600,Math.min(72_000,duration/100L));
+        worker.execute(()->AudioWaveformExtractor.extract(this,uri,buckets,new AudioWaveformExtractor.Callback(){
+            public void complete(float[] levels){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null&&waveformEnabled)waveform.setLevels(levels);finishWaveformAnalysis();});}
+            public void failed(){runOnUiThread(()->{Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();});}
+        }));
+    }
     private void finishWaveformAnalysis(){if(resumeAfterWaveform&&player!=null&&!player.isPlaying())player.play();resumeAfterWaveform=false;}
+
+    private void createFloatingWaveform(){
+        waveform=new WaveformView(this);
+        GradientDrawable background=new GradientDrawable();
+        background.setColor(0xCC111827);
+        background.setCornerRadius(dp(14));
+        waveform.setBackground(background);
+        waveform.setPadding(dp(8),dp(7),dp(8),dp(7));
+        waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
+        FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(72),Gravity.TOP|Gravity.START);
+        params.leftMargin=dp(24);params.rightMargin=dp(24);params.topMargin=dp(190);
+        root.addView(waveform,params);
+        waveform.post(()->{
+            float maxX=Math.max(0,root.getWidth()-waveform.getWidth());
+            float maxY=Math.max(0,root.getHeight()-waveform.getHeight());
+            waveform.setX(preferences.getFloat("waveform_x_fraction",.5f)*maxX);
+            waveform.setY(preferences.getFloat("waveform_y_fraction",.62f)*maxY);
+        });
+        waveform.setOnTouchListener((view,event)->{
+            if(event.getActionMasked()==MotionEvent.ACTION_DOWN){
+                waveformDragStartX=event.getRawX();waveformDragStartY=event.getRawY();
+                waveformStartX=view.getX();waveformStartY=view.getY();view.bringToFront();return true;
+            }
+            if(event.getActionMasked()==MotionEvent.ACTION_MOVE){
+                float x=waveformStartX+event.getRawX()-waveformDragStartX;
+                float y=waveformStartY+event.getRawY()-waveformDragStartY;
+                x=Math.max(0,Math.min(root.getWidth()-view.getWidth(),x));
+                y=Math.max(0,Math.min(root.getHeight()-view.getHeight(),y));
+                view.setX(x);view.setY(y);return true;
+            }
+            if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL){
+                float maxX=Math.max(1,root.getWidth()-view.getWidth());
+                float maxY=Math.max(1,root.getHeight()-view.getHeight());
+                preferences.edit().putFloat("waveform_x_fraction",view.getX()/maxX).putFloat("waveform_y_fraction",view.getY()/maxY).apply();
+                return true;
+            }
+            return false;
+        });
+    }
 
     private TextView addControl(LinearLayout row,String text,int size,View.OnClickListener click){
         FrameLayout slot=new FrameLayout(this);TextView v=label(text,size);v.setShadowLayer(dp(4),0,dp(1),Color.BLACK);
@@ -443,11 +496,21 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,13,12,"Playback diagnostics");
         m.getMenu().add(0,16,13,"Subtitle appearance");
         m.getMenu().add(0,17,14,"Playlist");
-        m.getMenu().add(0,18,15,"Analyze audio waveform");
+        m.getMenu().add(0,18,15,"Audio waveform: "+(waveformEnabled?"On":"Off"));
         if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,16,"Picture in picture");m.getMenu().add(0,15,17,"Auto pop-up: "+(autoPip?"On":"Off"));}
         m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:syncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;}return true;});m.show();
     }
-    private void analyzeWaveform(){resumeAfterWaveform=player.isPlaying();if(resumeAfterWaveform)player.pause();Toast.makeText(this,"Analyzing audio waveform…",Toast.LENGTH_SHORT).show();loadWaveform();}
+    private void analyzeWaveform(){
+        waveformEnabled=!waveformEnabled;
+        preferences.edit().putBoolean("waveform_enabled",waveformEnabled).apply();
+        if(waveform==null)return;
+        waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
+        if(!waveformEnabled){waveform.setLevels(null);Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
+        resumeAfterWaveform=player.isPlaying();
+        if(resumeAfterWaveform)player.pause();
+        Toast.makeText(this,"Analyzing audio waveform…",Toast.LENGTH_SHORT).show();
+        loadWaveform();
+    }
     private void soundProtectionMenu(){
         String[] modes={"Off","Low","Medium","Strong"};
         new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Sudden sound protection").setSingleChoiceItems(modes,soundProtection,(dialog,which)->{
@@ -561,9 +624,9 @@ public class PlayerActivity extends AppCompatActivity {
     @Override public void onPictureInPictureModeChanged(boolean inPictureInPictureMode, android.content.res.Configuration newConfig){
         super.onPictureInPictureModeChanged(inPictureInPictureMode,newConfig);
         if(inPictureInPictureMode){
-            top.setVisibility(View.GONE);bottom.setVisibility(View.GONE);((View)quickTools.getTag()).setVisibility(View.GONE);lock.setVisibility(View.GONE);screenshotButton.setVisibility(View.GONE);hint.setVisibility(View.GONE);
+            top.setVisibility(View.GONE);bottom.setVisibility(View.GONE);((View)quickTools.getTag()).setVisibility(View.GONE);lock.setVisibility(View.GONE);screenshotButton.setVisibility(View.GONE);hint.setVisibility(View.GONE);if(waveform!=null)waveform.setVisibility(View.GONE);
         }else if(!locked){
-            int visibility=controls?View.VISIBLE:View.GONE;top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);screenshotButton.setVisibility(visibility);
+            int visibility=controls?View.VISIBLE:View.GONE;top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);screenshotButton.setVisibility(visibility);if(waveform!=null)waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
         }
     }
     @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null&&player!=null){player.setEqualizer(null);cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
