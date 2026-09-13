@@ -307,7 +307,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void makeQuickTools(){android.widget.HorizontalScrollView scroll=new android.widget.HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);scroll.setBackgroundColor(0x75000000);quickTools=new LinearLayout(this);quickTools.setGravity(Gravity.CENTER_VERTICAL);quickTools.setPadding(dp(8),dp(5),dp(8),dp(5));
         addQuick("☾\nNIGHT",v->{WindowManager.LayoutParams p=getWindow().getAttributes();p.screenBrightness=p.screenBrightness>.3f?.18f:.65f;getWindow().setAttributes(p);});
-        addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());addQuick("⇄\nMIRROR",v->video.setScaleX(video.getScaleX()<0?1f:-1f));addQuick("↻\nROTATE",v->rotate());
+        addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());addQuick("⇄\nMIRROR",v->toggleMirror());addQuick("↻\nROTATE",v->rotate());
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
     }
@@ -400,7 +400,7 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,16,13,"Subtitle appearance");
         m.getMenu().add(0,17,14,"Playlist");
         if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,15,"Picture in picture");m.getMenu().add(0,15,16,"Auto pop-up: "+(autoPip?"On":"Off"));}
-        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 5:video.setScaleX(video.getScaleX()<0?1f:-1f);break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:syncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;}return true;});m.show();
+        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 5:toggleMirror();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:syncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;}return true;});m.show();
     }
     private void soundProtectionMenu(){
         String[] modes={"Off","Low","Medium","Strong"};
@@ -418,6 +418,7 @@ public class PlayerActivity extends AppCompatActivity {
         player.setEqualizer(cleanupEqualizer);
     }
     private void toggleHeadphoneSafety(){headphoneSafety=!headphoneSafety;preferences.edit().putBoolean("headphone_safety",headphoneSafety).apply();Toast.makeText(this,"Headphone safety: "+(headphoneSafety?"On":"Off"),Toast.LENGTH_SHORT).show();if(headphoneSafety)applySafeStart();}
+    private void toggleMirror(){float target=video.getRotationY()==0f?180f:0f;video.setPivotX(video.getWidth()/2f);video.setPivotY(video.getHeight()/2f);video.animate().rotationY(target).setDuration(180).start();Toast.makeText(this,target==180f?"Mirror on":"Mirror off",Toast.LENGTH_SHORT).show();}
     private void stepFrame(){if(player.isPlaying())player.pause();player.setTime(Math.max(0,player.getTime()+40));}
     private void syncMenu(){
         String[] items={"Audio −50 ms","Audio +50 ms","Subtitle −100 ms","Subtitle +100 ms","Reset synchronization"};
