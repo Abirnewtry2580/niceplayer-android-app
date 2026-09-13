@@ -25,6 +25,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.ArrayList;
 import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
 
@@ -44,6 +45,15 @@ public class VideoLibraryPlugin extends Plugin {
         Intent intent = new Intent(getContext(), PlayerActivity.class);
         intent.setData(Uri.parse(uri));
         intent.putExtra("title", call.getString("title", "Video"));
+        intent.putExtra("index", call.getInt("index", 0));
+        JSArray uriArray = call.getArray("uris");
+        JSArray titleArray = call.getArray("titles");
+        ArrayList<String> uris = new ArrayList<>();
+        ArrayList<String> titles = new ArrayList<>();
+        if (uriArray != null) for (int i = 0; i < uriArray.length(); i++) uris.add(uriArray.optString(i));
+        if (titleArray != null) for (int i = 0; i < titleArray.length(); i++) titles.add(titleArray.optString(i));
+        intent.putStringArrayListExtra("uris", uris);
+        intent.putStringArrayListExtra("titles", titles);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         getActivity().startActivity(intent);
         call.resolve();
