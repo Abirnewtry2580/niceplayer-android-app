@@ -302,7 +302,7 @@ public class PlayerActivity extends AppCompatActivity {
         hint = label("", 17); hint.setBackgroundColor(0xCC111827); hint.setPadding(dp(18),dp(10),dp(18),dp(10)); hint.setVisibility(View.GONE);
         root.addView(hint, new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER));
         gestureLevel=new GestureLevelView(this);gestureLevel.setVisibility(View.GONE);
-        FrameLayout.LayoutParams levelParams=new FrameLayout.LayoutParams(dp(8),dp(170),Gravity.START|Gravity.CENTER_VERTICAL);levelParams.leftMargin=dp(28);root.addView(gestureLevel,levelParams);
+        FrameLayout.LayoutParams levelParams=new FrameLayout.LayoutParams(dp(34),dp(200),Gravity.START|Gravity.CENTER_VERTICAL);levelParams.leftMargin=dp(28);root.addView(gestureLevel,levelParams);
 
         GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onSingleTapConfirmed(MotionEvent e) { toggleControls(); return true; }
@@ -492,7 +492,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void showGestureLevel(float level,boolean volumeSide){
         if(gestureLevel==null)return;
-        gestureLevel.setLevel(Math.max(0f,Math.min(1f,level)));
+        gestureLevel.setLevel(Math.max(0f,Math.min(1f,level)),volumeSide);
         FrameLayout.LayoutParams params=(FrameLayout.LayoutParams)gestureLevel.getLayoutParams();
         params.gravity=(volumeSide?Gravity.START:Gravity.END)|Gravity.CENTER_VERTICAL;
         params.leftMargin=volumeSide?dp(28):0;params.rightMargin=volumeSide?0:dp(28);
@@ -795,13 +795,27 @@ public class PlayerActivity extends AppCompatActivity {
     private class GestureLevelView extends View{
         private final Paint levelPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         private float level;
-        GestureLevelView(Context context){super(context);}
-        void setLevel(float value){level=value;invalidate();}
+        private boolean volume;
+        GestureLevelView(Context context){super(context);levelPaint.setStrokeCap(Paint.Cap.ROUND);levelPaint.setStrokeJoin(Paint.Join.ROUND);}
+        void setLevel(float value,boolean volumeIndicator){level=value;volume=volumeIndicator;invalidate();}
         @Override protected void onDraw(Canvas canvas){
-            float w=getWidth(),h=getHeight(),radius=w/2f;
-            levelPaint.setColor(0x55FFFFFF);canvas.drawRoundRect(0,0,w,h,radius,radius,levelPaint);
-            levelPaint.setColor(0xE6FFFFFF);float top=h-(h*level);
-            canvas.drawRoundRect(0,top,w,h,radius,radius,levelPaint);
+            float cx=getWidth()/2f,barHalf=dp(4),barBottom=getHeight()-dp(34),radius=barHalf;
+            levelPaint.setStyle(Paint.Style.FILL);levelPaint.setColor(0x55FFFFFF);
+            canvas.drawRoundRect(cx-barHalf,0,cx+barHalf,barBottom,radius,radius,levelPaint);
+            levelPaint.setColor(0xE6FFFFFF);float top=barBottom-(barBottom*level);
+            canvas.drawRoundRect(cx-barHalf,top,cx+barHalf,barBottom,radius,radius,levelPaint);
+            float iy=getHeight()-dp(15);levelPaint.setColor(0xEFFFFFFF);levelPaint.setStrokeWidth(dp(2));levelPaint.setStyle(Paint.Style.STROKE);
+            if(volume){
+                android.graphics.Path speaker=new android.graphics.Path();
+                speaker.moveTo(cx-dp(10),iy-dp(3));speaker.lineTo(cx-dp(6),iy-dp(3));speaker.lineTo(cx-dp(1),iy-dp(8));
+                speaker.lineTo(cx-dp(1),iy+dp(8));speaker.lineTo(cx-dp(6),iy+dp(3));speaker.lineTo(cx-dp(10),iy+dp(3));speaker.close();
+                levelPaint.setStyle(Paint.Style.FILL);canvas.drawPath(speaker,levelPaint);levelPaint.setStyle(Paint.Style.STROKE);
+                canvas.drawArc(cx-dp(2),iy-dp(7),cx+dp(8),iy+dp(7),-55,110,false,levelPaint);
+                canvas.drawArc(cx-dp(2),iy-dp(11),cx+dp(14),iy+dp(11),-48,96,false,levelPaint);
+            }else{
+                canvas.drawCircle(cx,iy,dp(5),levelPaint);
+                for(int i=0;i<8;i++){double a=i*Math.PI/4;float x1=cx+(float)Math.cos(a)*dp(8),y1=iy+(float)Math.sin(a)*dp(8);float x2=cx+(float)Math.cos(a)*dp(11),y2=iy+(float)Math.sin(a)*dp(11);canvas.drawLine(x1,y1,x2,y2,levelPaint);}
+            }
         }
     }
 
