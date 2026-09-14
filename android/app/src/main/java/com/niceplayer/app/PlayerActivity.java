@@ -354,10 +354,10 @@ public class PlayerActivity extends AppCompatActivity {
             public void onStopTrackingTouch(SeekBar b){player.setTime(b.getProgress());dragging=false;}
         }); bottom.addView(seek,new LinearLayout.LayoutParams(-1,dp(30)));
         LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER);
-        addControl(row,"|◀",21,v->playAt(playlistIndex-1)); addControl(row,"↶ 10",18,v->jump(-TEN_SECONDS));
-        play=addControl(row,"▶",31,v->{if(player.isPlaying())player.pause();else player.play();});
-        addControl(row,"10 ↷",18,v->jump(TEN_SECONDS));
-        addControl(row,"▶|",21,v->playAt(playlistIndex+1));
+        addControl(row,"|◀",21,v->playAt(playlistIndex-1),46); addControl(row,"↶ 10",18,v->jump(-TEN_SECONDS),46);
+        play=addControl(row,"▶",31,v->{if(player.isPlaying())player.pause();else player.play();},58);
+        addControl(row,"10 ↷",18,v->jump(TEN_SECONDS),46);
+        addControl(row,"▶|",21,v->playAt(playlistIndex+1),46);
         bottom.addView(row,new LinearLayout.LayoutParams(-1,dp(55)));
         time=label("00:00  /  00:00",12); time.setShadowLayer(dp(3),0,dp(1),Color.BLACK);time.setGravity(Gravity.START|Gravity.CENTER_VERTICAL); bottom.addView(time,new LinearLayout.LayoutParams(-1,dp(24)));
         root.addView(bottom,new FrameLayout.LayoutParams(-1,dp(115),Gravity.BOTTOM));
@@ -430,11 +430,11 @@ public class PlayerActivity extends AppCompatActivity {
         root.post(()->{positionWaveformFromPreferences();waveform.bringToFront();waveform.invalidate();});
     }
 
-    private TextView addControl(LinearLayout row,String text,int size,View.OnClickListener click){
+    private TextView addControl(LinearLayout row,String text,int size,View.OnClickListener click,int slotWidth){
         FrameLayout slot=new FrameLayout(this);TextView v=label(text,size);v.setShadowLayer(dp(4),0,dp(1),Color.BLACK);
         GradientDrawable circle=new GradientDrawable();circle.setShape(GradientDrawable.OVAL);circle.setColor(Color.TRANSPARENT);circle.setStroke(dp(1),Color.TRANSPARENT);v.setBackground(circle);
         v.setOnTouchListener((buttonView,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN){circle.setColor(0x66000000);circle.setStroke(dp(1),0xCCFFFFFF);buttonView.invalidate();handler.postDelayed(()->{circle.setColor(Color.TRANSPARENT);circle.setStroke(dp(1),Color.TRANSPARENT);buttonView.invalidate();},500);}return false;});
-        if(click!=null)v.setOnClickListener(click);FrameLayout.LayoutParams button=new FrameLayout.LayoutParams(dp(50),dp(50),Gravity.CENTER);slot.addView(v,button);LinearLayout.LayoutParams slotParams=new LinearLayout.LayoutParams(dp(54),dp(55));slotParams.setMargins(dp(1),0,dp(1),0);row.addView(slot,slotParams);return v;
+        if(click!=null)v.setOnClickListener(click);FrameLayout.LayoutParams button=new FrameLayout.LayoutParams(dp(Math.min(50,slotWidth)),dp(50),Gravity.CENTER);slot.addView(v,button);LinearLayout.LayoutParams slotParams=new LinearLayout.LayoutParams(dp(slotWidth),dp(55));slotParams.setMargins(dp(1),0,dp(1),0);row.addView(slot,slotParams);return v;
     }
 
     private boolean gesture(MotionEvent e, GestureDetector detector) {
