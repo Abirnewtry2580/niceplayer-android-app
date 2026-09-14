@@ -698,11 +698,11 @@ public class PlayerActivity extends AppCompatActivity {
         Bitmap bitmap=Bitmap.createBitmap(videoSurface.getWidth(),videoSurface.getHeight(),Bitmap.Config.ARGB_8888);
         if(videoSurface instanceof TextureView){
             Bitmap frame=((TextureView)videoSurface).getBitmap(bitmap);
-            if(frame!=null)save(frame);else{bitmap.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}
+            if(frame!=null)saveVideoFrame(frame);else{bitmap.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}
             return;
         }
         if(Build.VERSION.SDK_INT>=24&&videoSurface instanceof SurfaceView){
-            PixelCopy.request((SurfaceView)videoSurface,bitmap,result->{if(result==PixelCopy.SUCCESS)save(bitmap);else{bitmap.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}},handler);
+            PixelCopy.request((SurfaceView)videoSurface,bitmap,result->{if(result==PixelCopy.SUCCESS)saveVideoFrame(bitmap);else{bitmap.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}},handler);
             return;
         }
         bitmap.recycle();Toast.makeText(this,"Video-only screenshot is unavailable on this device",Toast.LENGTH_SHORT).show();
@@ -711,6 +711,43 @@ public class PlayerActivity extends AppCompatActivity {
         if(view instanceof SurfaceView||view instanceof TextureView)return view;
         if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++){View found=findVideoSurface(group.getChildAt(i));if(found!=null)return found;}}
         return null;
+    }
+    private void saveVideoFrame(Bitmap surfaceBitmap){
+        Bitmap frame=cropToVideoContent(surfaceBitmap);
+        if(frame!=surfaceBitmap)surfaceBitmap.recycle();
+        save(frame);
+    }
+    private Bitmap cropToVideoContent(Bitmap bitmap){
+        MediaMetadataRetriever retriever=new MediaMetadataRetriever();
+        try{
+            if("content".equalsIgnoreCase(sourceUri.getScheme())){
+                try(ParcelFileDescriptor descriptor=getContentResolver().openFileDescriptor(sourceUri,"r")){
+                    if(descriptor==null)return bitmap;
+                    retriever.setDataSource(descriptor.getFileDescriptor());
+                    return cropToMediaAspect(bitmap,retriever);
+                }
+            }
+            retriever.setDataSource(this,sourceUri);
+            return cropToMediaAspect(bitmap,retriever);
+        }catch(Exception error){Log.w(TAG,"Could not crop screenshot to video frame",error);return bitmap;}
+        finally{try{retriever.release();}catch(Exception ignored){}}
+    }
+    private Bitmap cropToMediaAspect(Bitmap bitmap,MediaMetadataRetriever retriever){
+        String widthText=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH);
+        String heightText=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
+        String rotationText=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+        if(widthText==null||heightText==null)return bitmap;
+        int mediaWidth=Integer.parseInt(widthText),mediaHeight=Integer.parseInt(heightText);
+        int rotation=rotationText==null?0:Integer.parseInt(rotationText);
+        if(rotation==90||rotation==270){int swap=mediaWidth;mediaWidth=mediaHeight;mediaHeight=swap;}
+        if(mediaWidth<=0||mediaHeight<=0)return bitmap;
+        float mediaAspect=mediaWidth/(float)mediaHeight,surfaceAspect=bitmap.getWidth()/(float)bitmap.getHeight();
+        int cropWidth=bitmap.getWidth(),cropHeight=bitmap.getHeight();
+        if(surfaceAspect>mediaAspect)cropWidth=Math.round(cropHeight*mediaAspect);
+        else cropHeight=Math.round(cropWidth/mediaAspect);
+        int left=Math.max(0,(bitmap.getWidth()-cropWidth)/2),top=Math.max(0,(bitmap.getHeight()-cropHeight)/2);
+        if(cropWidth==bitmap.getWidth()&&cropHeight==bitmap.getHeight())return bitmap;
+        return Bitmap.createBitmap(bitmap,left,top,cropWidth,cropHeight);
     }
     private void save(Bitmap b){try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"NicePlayer_"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/NicePlayer");Uri u=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(u==null)throw new Exception();try(OutputStream s=getContentResolver().openOutputStream(u)){if(s==null||!b.compress(Bitmap.CompressFormat.JPEG,94,s))throw new Exception();}Toast.makeText(this,"Screenshot saved",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Could not save screenshot",Toast.LENGTH_LONG).show();}finally{b.recycle();}}
     private void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
