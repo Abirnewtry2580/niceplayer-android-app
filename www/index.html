@@ -15,7 +15,7 @@
         
         .player-wrapper { position: relative; width: 100vw; height: 100vh; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
         .video-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }
-        video { width: 100%; height: 100%; object-fit: contain; transition: filter 0.3s ease; }
+        video { width: 100%; height: 100%; object-fit: contain; }
 
         /* Custom Subtitle Styling */
         video::cue {
@@ -228,7 +228,6 @@
         <!-- Scrollable Quick Tools -->
         <div class="overlay quick-tools">
             <div class="tool-item" onclick="openPanel('ratioPanel')"><div class="tool-icon">📐</div>Ratio</div>
-            <div class="tool-item" onclick="openPanel('visualPanel')"><div class="tool-icon">🎨</div>Visual</div>
             <div class="tool-item" onclick="openPanel('abLoopPanel')"><div class="tool-icon">🔁</div>A-B Loop</div>
             <div class="tool-item" onclick="openPanel('speedPanel')"><div class="tool-icon" id="speedBadge">1x</div>Speed</div>
             <div class="tool-item" onclick="openPanel('eqPanel')"><div class="tool-icon">🎛️</div>EQ</div>
@@ -279,20 +278,6 @@
                     <div class="grid-btn" onclick="setCustomRatio(16/9)">16:9</div>
                     <div class="grid-btn" onclick="setCustomRatio(4/3)">4:3</div>
                     <div class="grid-btn" onclick="setCustomRatio(2.35)">2.35:1</div>
-                </div>
-            </div>
-        </div>
-
-        <div class="modal-panel" id="visualPanel">
-            <div class="modal-header"><span>Visual Enhancer</span><span class="close-btn" onclick="closePanels()">✕</span></div>
-            <div class="panel-section">
-                <div class="btn-grid" style="grid-template-columns: repeat(2, 1fr);">
-                    <div class="grid-btn active" onclick="setFilter('none')">Original</div>
-                    <div class="grid-btn" onclick="setFilter('contrast(125%) saturate(130%)')">HDR</div>
-                    <div class="grid-btn" onclick="setFilter('brightness(110%) contrast(110%)')">Clear</div>
-                    <div class="grid-btn" onclick="setFilter('hue-rotate(180deg)')">Arctic Blue</div>
-                    <div class="grid-btn" onclick="setFilter('sepia(30%) saturate(140%)')">Warm Glow</div>
-                    <div class="grid-btn" onclick="setFilter('contrast(130%) sepia(20%)')">Cinematic</div>
                 </div>
             </div>
         </div>
@@ -989,7 +974,6 @@
             else { videoContainer.style.width = '100%'; videoContainer.style.height = (window.innerWidth / ratio) + 'px'; }
             closePanels();
         }
-        function setFilter(filterCss) { video.style.filter = filterCss; closePanels(); }
 
         const speedSlider = document.getElementById('speedSlider');
         speedSlider.addEventListener('input', () => {
