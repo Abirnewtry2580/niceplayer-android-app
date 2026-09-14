@@ -432,14 +432,14 @@ public class PlayerActivity extends AppCompatActivity {
 
     private TextView addControl(LinearLayout row,String text,int size,View.OnClickListener click,int slotWidth){
         FrameLayout slot=new FrameLayout(this);TextView v=new PlaybackControlView(this,text);
-        GradientDrawable circle=new GradientDrawable();circle.setShape(GradientDrawable.OVAL);circle.setColor(0x8C111827);circle.setStroke(dp(1),0x66FFFFFF);v.setBackground(circle);
+        GradientDrawable circle=new GradientDrawable();circle.setShape(GradientDrawable.OVAL);circle.setColor(Color.TRANSPARENT);circle.setStroke(dp(1),Color.TRANSPARENT);v.setBackground(circle);
         v.setOnTouchListener((buttonView,event)->{
             int action=event.getActionMasked();
             if(action==MotionEvent.ACTION_DOWN){
                 circle.setColor(0xCC172554);circle.setStroke(dp(2),0xFF7C6CFF);
                 buttonView.animate().scaleX(.96f).scaleY(.96f).setDuration(70).start();buttonView.invalidate();
             }else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL){
-                circle.setColor(0x8C111827);circle.setStroke(dp(1),0x66FFFFFF);
+                circle.setColor(Color.TRANSPARENT);circle.setStroke(dp(1),Color.TRANSPARENT);
                 buttonView.animate().scaleX(1f).scaleY(1f).setDuration(120).start();buttonView.invalidate();
             }
             return false;
