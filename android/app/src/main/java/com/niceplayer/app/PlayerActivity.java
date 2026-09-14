@@ -451,7 +451,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private boolean gesture(MotionEvent e, GestureDetector detector) {
-        scaleDetector.onTouchEvent(e);if(locked)return true;
+        scaleDetector.onTouchEvent(e);if(locked){detector.onTouchEvent(e);return true;}
         if(e.getPointerCount()>1||scaleDetector.isInProgress()){
             if(e.getActionMasked()==MotionEvent.ACTION_POINTER_DOWN){lastPanTouchX=e.getX(0);lastPanTouchY=e.getY(0);}return true;
         }
