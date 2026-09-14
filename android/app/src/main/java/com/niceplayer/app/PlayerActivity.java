@@ -340,7 +340,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LinearLayout.LayoutParams topButtonParams(int size){LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(size),dp(size));params.setMargins(dp(3),0,dp(3),0);return params;}
 
     private void makeQuickTools(){android.widget.HorizontalScrollView scroll=new android.widget.HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);scroll.setBackgroundColor(Color.TRANSPARENT);quickTools=new LinearLayout(this);quickTools.setGravity(Gravity.CENTER_VERTICAL);quickTools.setPadding(dp(8),dp(5),dp(8),dp(5));
-        addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("⊕\nPINCH",v->zoomMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());addQuick("↻\nROTATE",v->rotate());
+        addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("⊕\nPINCH",v->zoomMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());
         TextView rotationLock=addQuick("ROTATION\nLOCK",null);rotationLock.setOnClickListener(v->toggleOrientationLock(rotationLock));
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
