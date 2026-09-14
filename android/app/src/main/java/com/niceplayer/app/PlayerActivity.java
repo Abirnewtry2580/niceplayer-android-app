@@ -789,6 +789,7 @@ public class PlayerActivity extends AppCompatActivity {
         @Override protected void onDraw(Canvas canvas){
             float cx=getWidth()/2f,cy=getHeight()/2f,u=Math.min(getWidth(),getHeight())/48f;
             String action=getText().toString();
+            if(action.equals("▶")||action.equals("Ⅱ"))u*=1.15f;
             iconPaint.setColor(Color.WHITE);iconPaint.setStyle(Paint.Style.STROKE);iconPaint.setStrokeWidth(3.1f*u);
             if(action.contains("10")){
                 boolean backward=action.startsWith("↶");
