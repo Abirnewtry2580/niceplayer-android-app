@@ -19,4 +19,15 @@
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
     </style>
+    <style name="NicePlayerPopupTheme" parent="ThemeOverlay.AppCompat.Dark">
+        <item name="android:colorBackground">#0B1220</item>
+        <item name="android:windowBackground">#0B1220</item>
+        <item name="android:panelColorBackground">#0B1220</item>
+        <item name="android:textColorPrimary">#F8FAFC</item>
+        <item name="android:textColorSecondary">#94A3B8</item>
+        <item name="colorAccent">#22D3EE</item>
+        <item name="colorControlNormal">#F8FAFC</item>
+        <item name="colorControlHighlight">#263247</item>
+    </style>
+
 </resources>
