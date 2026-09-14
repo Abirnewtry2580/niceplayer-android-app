@@ -79,7 +79,7 @@ public class PlayerActivity extends AppCompatActivity {
     private float equalizerPreamp;
     private float[] equalizerGains;
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
-    private boolean waveformEnabled;
+    private boolean waveformEnabled, pipTransitionPending;
     private float waveformDragStartX, waveformDragStartY, waveformStartX, waveformStartY;
     private long pointA = -1, pointB = -1, audioDelay, subtitleDelay;
     private boolean resumeAfterWaveform;
@@ -599,14 +599,22 @@ public class PlayerActivity extends AppCompatActivity {
         String[] names={"15 minutes","30 minutes","60 minutes","90 minutes","Cancel timer"};int[] minutes={15,30,60,90,0};
         new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Sleep timer").setItems(names,(d,n)->{handler.removeCallbacksAndMessages("sleep");if(minutes[n]>0){Runnable stop=()->{if(player!=null)player.pause();Toast.makeText(this,"Sleep timer finished",Toast.LENGTH_LONG).show();};handler.postAtTime(stop,"sleep",SystemClock.uptimeMillis()+minutes[n]*60000L);Toast.makeText(this,"Timer set for "+names[n],Toast.LENGTH_SHORT).show();}else Toast.makeText(this,"Sleep timer cancelled",Toast.LENGTH_SHORT).show();}).show();
     }
+    private void setPipOverlayState(View view,boolean hidden){
+        if(view==null)return;
+        view.animate().cancel();
+        view.setAlpha(hidden?0f:1f);
+        view.setVisibility(hidden?View.INVISIBLE:View.VISIBLE);
+    }
     private void hidePlayerOverlaysForPip(){
-        top.setVisibility(View.GONE);
-        bottom.setVisibility(View.GONE);
-        ((View)quickTools.getTag()).setVisibility(View.GONE);
-        lock.setVisibility(View.GONE);
-        screenshotButton.setVisibility(View.GONE);
-        hint.setVisibility(View.GONE);
-        if(waveform!=null)waveform.setVisibility(View.GONE);
+        setPipOverlayState(top,true);
+        setPipOverlayState(bottom,true);
+        setPipOverlayState((View)quickTools.getTag(),true);
+        setPipOverlayState(lock,true);
+        setPipOverlayState(screenshotButton,true);
+        setPipOverlayState(hint,true);
+        if(waveform!=null)setPipOverlayState(waveform,true);
+        root.requestLayout();
+        root.invalidate();
     }
     private void restorePlayerOverlaysAfterPipFailure(){
         if(locked)return;
@@ -617,17 +625,25 @@ public class PlayerActivity extends AppCompatActivity {
         if(waveform!=null)waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
     }
     private void enterPip(){
-        if(Build.VERSION.SDK_INT<26)return;
+        if(Build.VERSION.SDK_INT<26||pipTransitionPending||isInPictureInPictureMode())return;
+        pipTransitionPending=true;
         hidePlayerOverlaysForPip();
-        root.invalidate();
-        root.postDelayed(()->{
-            ArrayList<RemoteAction> actions=new ArrayList<>();
-            actions.add(pipAction(PlaybackService.PREVIOUS,"Previous",android.R.drawable.ic_media_previous,21));
-            actions.add(pipAction(PlaybackService.PLAY_PAUSE,"Play/Pause",android.R.drawable.ic_media_play,22));
-            actions.add(pipAction(PlaybackService.NEXT,"Next",android.R.drawable.ic_media_next,23));
-            PictureInPictureParams p=new PictureInPictureParams.Builder().setAspectRatio(new Rational(16,9)).setActions(actions).build();
-            if(!enterPictureInPictureMode(p))restorePlayerOverlaysAfterPipFailure();
-        },120);
+        final android.view.ViewTreeObserver.OnPreDrawListener[] listener=new android.view.ViewTreeObserver.OnPreDrawListener[1];
+        listener[0]=()->{
+            if(root.getViewTreeObserver().isAlive())root.getViewTreeObserver().removeOnPreDrawListener(listener[0]);
+            root.postOnAnimation(()->root.postOnAnimation(()->{
+                ArrayList<RemoteAction> actions=new ArrayList<>();
+                actions.add(pipAction(PlaybackService.PREVIOUS,"Previous",android.R.drawable.ic_media_previous,21));
+                actions.add(pipAction(PlaybackService.PLAY_PAUSE,"Play/Pause",android.R.drawable.ic_media_play,22));
+                actions.add(pipAction(PlaybackService.NEXT,"Next",android.R.drawable.ic_media_next,23));
+                PictureInPictureParams.Builder builder=new PictureInPictureParams.Builder().setAspectRatio(new Rational(16,9)).setActions(actions);
+                if(Build.VERSION.SDK_INT>=31)builder.setSeamlessResizeEnabled(false);
+                boolean entered=enterPictureInPictureMode(builder.build());
+                if(!entered){pipTransitionPending=false;restorePlayerOverlaysAfterPipFailure();}
+            }));
+            return true;
+        };
+        root.getViewTreeObserver().addOnPreDrawListener(listener[0]);
     }
     private RemoteAction pipAction(String action,String label,int icon,int request){Intent i=new Intent(action).setPackage(getPackageName());PendingIntent p=PendingIntent.getBroadcast(this,request,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);return new RemoteAction(Icon.createWithResource(this,icon),label,label,p);}
     private void createPreviewSheet(){
@@ -668,6 +684,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override protected void onUserLeaveHint(){super.onUserLeaveHint();if(autoPip&&Build.VERSION.SDK_INT>=26&&player!=null&&player.isPlaying()&&!isInPictureInPictureMode())enterPip();}
     @Override public void onPictureInPictureModeChanged(boolean inPictureInPictureMode, android.content.res.Configuration newConfig){
         super.onPictureInPictureModeChanged(inPictureInPictureMode,newConfig);
+        pipTransitionPending=false;
         if(inPictureInPictureMode){
             hidePlayerOverlaysForPip();
         }else if(!locked){
