@@ -619,10 +619,12 @@ public class PlayerActivity extends AppCompatActivity {
     private void restorePlayerOverlaysAfterPipFailure(){
         if(locked)return;
         int visibility=controls?View.VISIBLE:View.GONE;
+        top.setAlpha(1f);bottom.setAlpha(1f);((View)quickTools.getTag()).setAlpha(1f);lock.setAlpha(1f);
+        screenshotButton.setAlpha(.5f);
         top.setVisibility(visibility);bottom.setVisibility(visibility);
         ((View)quickTools.getTag()).setVisibility(visibility);
         lock.setVisibility(visibility);screenshotButton.setVisibility(visibility);
-        if(waveform!=null)waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
+        if(waveform!=null){waveform.setAlpha(1f);waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);}
     }
     private void enterPip(){
         if(Build.VERSION.SDK_INT<26||pipTransitionPending||isInPictureInPictureMode())return;
@@ -688,7 +690,7 @@ public class PlayerActivity extends AppCompatActivity {
         if(inPictureInPictureMode){
             hidePlayerOverlaysForPip();
         }else if(!locked){
-            int visibility=controls?View.VISIBLE:View.GONE;top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);screenshotButton.setVisibility(visibility);if(waveform!=null)waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
+            restorePlayerOverlaysAfterPipFailure();
         }
     }
     @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null&&player!=null){player.setEqualizer(null);cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
