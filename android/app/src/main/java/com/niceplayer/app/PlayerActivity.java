@@ -576,29 +576,111 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void audioCleanupMenu(){
         ensureEqualizerSettings();
-        LinearLayout panel=new LinearLayout(this);panel.setOrientation(LinearLayout.VERTICAL);panel.setPadding(dp(18),dp(8),dp(18),dp(8));
-        TextView note=label("Adjust each frequency separately (−20 to +20 dB)",13);note.setTextColor(0xFF222222);panel.addView(note,new LinearLayout.LayoutParams(-1,dp(38)));
-        SeekBar[] sliders=new SeekBar[equalizerGains.length+1];TextView[] values=new TextView[sliders.length];
+        final int surface=0xFF0B1220, textPrimary=0xFFF8FAFC, textSecondary=0xFF94A3B8, accent=0xFF22D3EE;
+
+        TextView dialogTitle=label("Audio equalizer",20);
+        dialogTitle.setTextColor(textPrimary);
+        dialogTitle.setTypeface(android.graphics.Typeface.DEFAULT,android.graphics.Typeface.BOLD);
+        dialogTitle.setPadding(dp(22),dp(20),dp(22),dp(12));
+        dialogTitle.setBackgroundColor(surface);
+
+        LinearLayout panel=new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(18),dp(6),dp(18),dp(28));
+        panel.setBackgroundColor(surface);
+
+        TextView note=label("Adjust each frequency separately (−20 to +20 dB)",13);
+        note.setTextColor(textSecondary);
+        note.setGravity(Gravity.CENTER_VERTICAL);
+        panel.addView(note,new LinearLayout.LayoutParams(-1,dp(42)));
+
+        SeekBar[] sliders=new SeekBar[equalizerGains.length+1];
+        TextView[] values=new TextView[sliders.length];
         addEqualizerSlider(panel,"PREAMP",equalizerPreamp,sliders,values,0);
-        for(int i=0;i<equalizerGains.length;i++)addEqualizerSlider(panel,formatFrequency(MediaPlayer.Equalizer.getBandFrequency(i)),equalizerGains[i],sliders,values,i+1);
-        android.widget.ScrollView scroll=new android.widget.ScrollView(this);scroll.addView(panel);
-        androidx.appcompat.app.AlertDialog dialog=new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Audio equalizer").setView(scroll)
+        for(int i=0;i<equalizerGains.length;i++){
+            addEqualizerSlider(panel,formatFrequency(MediaPlayer.Equalizer.getBandFrequency(i)),equalizerGains[i],sliders,values,i+1);
+        }
+
+        android.widget.ScrollView scroll=new android.widget.ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
+        scroll.setBackgroundColor(surface);
+        scroll.addView(panel,new android.widget.ScrollView.LayoutParams(-1,-2));
+
+        androidx.appcompat.app.AlertDialog dialog=new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setCustomTitle(dialogTitle).setView(scroll)
                 .setNegativeButton("OFF",null).setNeutralButton("RESET",null).setPositiveButton("APPLY",null).create();
+
         dialog.setOnShowListener(ignored->{
+            android.view.Window window=dialog.getWindow();
+            if(window!=null){
+                android.graphics.drawable.GradientDrawable background=new android.graphics.drawable.GradientDrawable();
+                background.setColor(surface);
+                background.setCornerRadius(dp(18));
+                window.setBackgroundDrawable(background);
+                android.util.DisplayMetrics metrics=getResources().getDisplayMetrics();
+                int maxWidth=Math.min(metrics.widthPixels-dp(28),dp(620));
+                int maxHeight=Math.min(metrics.heightPixels-dp(28),(int)(metrics.heightPixels*0.88f));
+                window.setLayout(maxWidth,maxHeight);
+            }
+
+            int[] buttonIds={
+                    androidx.appcompat.app.AlertDialog.BUTTON_NEGATIVE,
+                    androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL,
+                    androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE
+            };
+            for(int buttonId:buttonIds){
+                android.widget.Button button=dialog.getButton(buttonId);
+                button.setTextColor(accent);
+                button.setAllCaps(true);
+                button.setMinHeight(dp(52));
+            }
+
             dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
                 equalizerPreamp=progressToGain(sliders[0].getProgress());
                 for(int i=0;i<equalizerGains.length;i++)equalizerGains[i]=progressToGain(sliders[i+1].getProgress());
                 equalizerEnabled=true;saveEqualizerSettings();applyAudioCleanup();dialog.dismiss();
             });
-            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{equalizerEnabled=false;saveEqualizerSettings();applyAudioCleanup();dialog.dismiss();});
-            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{for(SeekBar slider:sliders)slider.setProgress(200);});
-        });dialog.show();
+            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{
+                equalizerEnabled=false;saveEqualizerSettings();applyAudioCleanup();dialog.dismiss();
+            });
+            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
+                for(SeekBar slider:sliders)slider.setProgress(200);
+            });
+        });
+        dialog.show();
     }
     private void addEqualizerSlider(LinearLayout panel,String name,float gain,SeekBar[] sliders,TextView[] values,int index){
-        LinearLayout heading=new LinearLayout(this);heading.setGravity(Gravity.CENTER_VERTICAL);
-        TextView band=label(name,13);band.setTextColor(0xFF222222);band.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);heading.addView(band,new LinearLayout.LayoutParams(0,dp(28),1));
-        TextView value=label(gainLabel(gain),13);value.setTextColor(0xFF006A72);heading.addView(value,new LinearLayout.LayoutParams(dp(72),dp(28)));panel.addView(heading);
-        SeekBar slider=new SeekBar(this);slider.setMax(400);slider.setProgress(gainToProgress(gain));slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onProgressChanged(SeekBar s,int p,boolean from){value.setText(gainLabel(progressToGain(p)));}public void onStartTrackingTouch(SeekBar s){}public void onStopTrackingTouch(SeekBar s){}});panel.addView(slider,new LinearLayout.LayoutParams(-1,dp(38)));sliders[index]=slider;values[index]=value;
+        LinearLayout heading=new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView band=label(name,13);
+        band.setTextColor(0xFFF8FAFC);
+        band.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);
+        heading.addView(band,new LinearLayout.LayoutParams(0,dp(30),1));
+        TextView value=label(gainLabel(gain),13);
+        value.setTextColor(0xFF22D3EE);
+        value.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        heading.addView(value,new LinearLayout.LayoutParams(dp(82),dp(30)));
+        panel.addView(heading);
+
+        SeekBar slider=new SeekBar(this);
+        slider.setMax(400);
+        slider.setProgress(gainToProgress(gain));
+        if(android.os.Build.VERSION.SDK_INT>=21){
+            slider.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFF14B8A6));
+            slider.setThumbTintList(android.content.res.ColorStateList.valueOf(0xFF22D3EE));
+            slider.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(0xFF334155));
+        }
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(SeekBar s,int p,boolean from){value.setText(gainLabel(progressToGain(p)));}
+            public void onStartTrackingTouch(SeekBar s){}
+            public void onStopTrackingTouch(SeekBar s){}
+        });
+        LinearLayout.LayoutParams sliderParams=new LinearLayout.LayoutParams(-1,dp(42));
+        sliderParams.setMargins(0,0,0,dp(6));
+        panel.addView(slider,sliderParams);
+        sliders[index]=slider;
+        values[index]=value;
     }
     private void ensureEqualizerSettings(){int count=MediaPlayer.Equalizer.getBandCount();if(equalizerGains!=null&&equalizerGains.length==count)return;equalizerGains=new float[count];for(int i=0;i<count;i++)equalizerGains[i]=preferences.getFloat("equalizer_band_"+i,0f);}
     private void saveEqualizerSettings(){SharedPreferences.Editor editor=preferences.edit().putBoolean("equalizer_enabled",equalizerEnabled).putFloat("equalizer_preamp",equalizerPreamp).putInt("audio_cleanup",equalizerEnabled?1:0);for(int i=0;i<equalizerGains.length;i++)editor.putFloat("equalizer_band_"+i,equalizerGains[i]);editor.apply();audioCleanup=equalizerEnabled?1:0;}
