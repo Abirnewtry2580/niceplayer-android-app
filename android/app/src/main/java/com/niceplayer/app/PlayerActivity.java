@@ -494,8 +494,8 @@ public class PlayerActivity extends AppCompatActivity {
         if(gestureLevel==null)return;
         gestureLevel.setLevel(Math.max(0f,Math.min(1f,level)));
         FrameLayout.LayoutParams params=(FrameLayout.LayoutParams)gestureLevel.getLayoutParams();
-        params.gravity=(volumeSide?Gravity.END:Gravity.START)|Gravity.CENTER_VERTICAL;
-        params.leftMargin=volumeSide?0:dp(28);params.rightMargin=volumeSide?dp(28):0;
+        params.gravity=(volumeSide?Gravity.START:Gravity.END)|Gravity.CENTER_VERTICAL;
+        params.leftMargin=volumeSide?dp(28):0;params.rightMargin=volumeSide?0:dp(28);
         gestureLevel.setLayoutParams(params);gestureLevel.setVisibility(View.VISIBLE);gestureLevel.bringToFront();
     }
 
