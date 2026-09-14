@@ -52,6 +52,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LinearLayout top, bottom, quickTools;
     private SeekBar seek;
     private WaveformView waveform;
+    private GestureLevelView gestureLevel;
     private TextView play, time, hint, lock, title, screenshotButton;
     private boolean dragging, controls = true, locked, orientationLocked;
     private boolean softwareRetryAttempted;
@@ -300,6 +301,8 @@ public class PlayerActivity extends AppCompatActivity {
         video = new VLCVideoLayout(this); root.addView(video, new FrameLayout.LayoutParams(-1, -1));
         hint = label("", 17); hint.setBackgroundColor(0xCC111827); hint.setPadding(dp(18),dp(10),dp(18),dp(10)); hint.setVisibility(View.GONE);
         root.addView(hint, new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER));
+        gestureLevel=new GestureLevelView(this);gestureLevel.setVisibility(View.GONE);
+        FrameLayout.LayoutParams levelParams=new FrameLayout.LayoutParams(dp(8),dp(170),Gravity.START|Gravity.CENTER_VERTICAL);levelParams.leftMargin=dp(28);root.addView(gestureLevel,levelParams);
 
         GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onSingleTapConfirmed(MotionEvent e) { toggleControls(); return true; }
@@ -475,16 +478,25 @@ public class PlayerActivity extends AppCompatActivity {
                 dragging=true; float change=-dy/root.getHeight();
                 if(downX<root.getWidth()/2f){
                     WindowManager.LayoutParams p=getWindow().getAttributes();p.screenBrightness=Math.max(.02f,Math.min(1f,startBrightness+change));getWindow().setAttributes(p);
-                    hint.setText("Brightness  "+Math.round(p.screenBrightness*100)+"%");
+                    hint.setText("Brightness  "+Math.round(p.screenBrightness*100)+"%");showGestureLevel(p.screenBrightness,false);
                 }else{
                     int max=audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),limit=headphoneSafety&&headphonesActive()?Math.max(1,Math.round(max*.7f)):max,n=Math.max(0,Math.min(limit,startVolume+Math.round(change*max)));
-                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC,n,0);hint.setText("Volume  "+Math.round(n*100f/max)+"%");
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC,n,0);hint.setText("Volume  "+Math.round(n*100f/max)+"%");showGestureLevel(n/(float)max,true);
                 }
                 hint.setVisibility(View.VISIBLE);
             }
         }
-        else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){hint.setVisibility(View.GONE);dragging=false;}
+        else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){hint.setVisibility(View.GONE);if(gestureLevel!=null)gestureLevel.setVisibility(View.GONE);dragging=false;}
         return true;
+    }
+
+    private void showGestureLevel(float level,boolean volumeSide){
+        if(gestureLevel==null)return;
+        gestureLevel.setLevel(Math.max(0f,Math.min(1f,level)));
+        FrameLayout.LayoutParams params=(FrameLayout.LayoutParams)gestureLevel.getLayoutParams();
+        params.gravity=(volumeSide?Gravity.END:Gravity.START)|Gravity.CENTER_VERTICAL;
+        params.leftMargin=volumeSide?0:dp(28);params.rightMargin=volumeSide?dp(28):0;
+        gestureLevel.setLayoutParams(params);gestureLevel.setVisibility(View.VISIBLE);gestureLevel.bringToFront();
     }
 
     private void applyVideoZoom(){
@@ -780,6 +792,19 @@ public class PlayerActivity extends AppCompatActivity {
         }
     }
     @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null&&player!=null){player.setEqualizer(null);cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
+    private class GestureLevelView extends View{
+        private final Paint levelPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float level;
+        GestureLevelView(Context context){super(context);}
+        void setLevel(float value){level=value;invalidate();}
+        @Override protected void onDraw(Canvas canvas){
+            float w=getWidth(),h=getHeight(),radius=w/2f;
+            levelPaint.setColor(0x55FFFFFF);canvas.drawRoundRect(0,0,w,h,radius,radius,levelPaint);
+            levelPaint.setColor(0xE6FFFFFF);float top=h-(h*level);
+            canvas.drawRoundRect(0,top,w,h,radius,radius,levelPaint);
+        }
+    }
+
     private class PlaybackControlView extends TextView{
         private final Paint iconPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         PlaybackControlView(Context context,String action){
