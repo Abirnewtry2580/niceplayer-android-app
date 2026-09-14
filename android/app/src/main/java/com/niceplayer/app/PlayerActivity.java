@@ -794,14 +794,14 @@ public class PlayerActivity extends AppCompatActivity {
             if(action.contains("10")){
                 boolean backward=action.startsWith("↶");
                 float radius=12*u;
-                canvas.drawArc(cx-radius,cy-radius,cx+radius,cy+radius,backward?-62f:-118f,backward?-275f:275f,false,iconPaint);
+                canvas.drawArc(cx-radius,cy-radius,cx+radius,cy+radius,backward?220f:-40f,backward?-280f:280f,false,iconPaint);
                 android.graphics.Path arrow=new android.graphics.Path();
                 if(backward){
-                    arrow.moveTo(cx-7*u,cy-13*u);arrow.lineTo(cx-15*u,cy-13*u);arrow.lineTo(cx-12*u,cy-5*u);
+                    arrow.moveTo(cx-14*u,cy-7*u);arrow.lineTo(cx-6.5f*u,cy-10.5f*u);arrow.lineTo(cx-9*u,cy-2.5f*u);
                 }else{
-                    arrow.moveTo(cx+7*u,cy-13*u);arrow.lineTo(cx+15*u,cy-13*u);arrow.lineTo(cx+12*u,cy-5*u);
+                    arrow.moveTo(cx+14*u,cy-7*u);arrow.lineTo(cx+6.5f*u,cy-10.5f*u);arrow.lineTo(cx+9*u,cy-2.5f*u);
                 }
-                iconPaint.setStyle(Paint.Style.FILL);canvas.drawPath(arrow,iconPaint);
+                arrow.close();iconPaint.setStyle(Paint.Style.FILL);canvas.drawPath(arrow,iconPaint);
                 iconPaint.setTextAlign(Paint.Align.CENTER);iconPaint.setTextSize(15.5f*u);
                 iconPaint.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT,android.graphics.Typeface.BOLD));
                 canvas.drawText("10",cx,cy+5.5f*u,iconPaint);
