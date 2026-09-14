@@ -307,7 +307,7 @@ public class PlayerActivity extends AppCompatActivity {
         });
         scaleDetector=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
             @Override public boolean onScale(ScaleGestureDetector d){
-                zoomScale=Math.max(1f,Math.min(5f,zoomScale*d.getScaleFactor()));
+                zoomScale=Math.max(1f,Math.min(4f,zoomScale*d.getScaleFactor()));
                 if(zoomScale<=1.01f){zoomScale=1f;videoPanX=videoPanY=0;}applyVideoZoom();
                 hint.setText("Zoom  "+Math.round(zoomScale*100)+"%");hint.setVisibility(View.VISIBLE);return true;
             }
@@ -340,7 +340,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LinearLayout.LayoutParams topButtonParams(int size){LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(size),dp(size));params.setMargins(dp(3),0,dp(3),0);return params;}
 
     private void makeQuickTools(){android.widget.HorizontalScrollView scroll=new android.widget.HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);scroll.setBackgroundColor(Color.TRANSPARENT);quickTools=new LinearLayout(this);quickTools.setGravity(Gravity.CENTER_VERTICAL);quickTools.setPadding(dp(8),dp(5),dp(8),dp(5));
-        addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());addQuick("↻\nROTATE",v->rotate());
+        addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("⊕\nPINCH",v->zoomMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());addQuick("↻\nROTATE",v->rotate());
         TextView rotationLock=addQuick("ROTATION\nLOCK",null);rotationLock.setOnClickListener(v->toggleOrientationLock(rotationLock));
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
@@ -434,7 +434,7 @@ public class PlayerActivity extends AppCompatActivity {
         FrameLayout slot=new FrameLayout(this);TextView v=label(text,size);v.setShadowLayer(dp(4),0,dp(1),Color.BLACK);
         GradientDrawable circle=new GradientDrawable();circle.setShape(GradientDrawable.OVAL);circle.setColor(Color.TRANSPARENT);circle.setStroke(dp(1),Color.TRANSPARENT);v.setBackground(circle);
         v.setOnTouchListener((buttonView,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN){circle.setColor(0x66000000);circle.setStroke(dp(1),0xCCFFFFFF);buttonView.invalidate();handler.postDelayed(()->{circle.setColor(Color.TRANSPARENT);circle.setStroke(dp(1),Color.TRANSPARENT);buttonView.invalidate();},500);}return false;});
-        if(click!=null)v.setOnClickListener(click);FrameLayout.LayoutParams button=new FrameLayout.LayoutParams(dp(50),dp(50),Gravity.CENTER);slot.addView(v,button);row.addView(slot,new LinearLayout.LayoutParams(0,dp(55),1));return v;
+        if(click!=null)v.setOnClickListener(click);FrameLayout.LayoutParams button=new FrameLayout.LayoutParams(dp(50),dp(50),Gravity.CENTER);slot.addView(v,button);LinearLayout.LayoutParams slotParams=new LinearLayout.LayoutParams(dp(54),dp(55));slotParams.setMargins(dp(1),0,dp(1),0);row.addView(slot,slotParams);return v;
     }
 
     private boolean gesture(MotionEvent e, GestureDetector detector) {
@@ -480,6 +480,14 @@ public class PlayerActivity extends AppCompatActivity {
         video.setScaleX(zoomScale);video.setScaleY(zoomScale);video.setTranslationX(videoPanX);video.setTranslationY(videoPanY);
     }
     private void resetVideoZoom(boolean notify){zoomScale=1f;videoPanX=videoPanY=0;if(video!=null)applyVideoZoom();if(notify)Toast.makeText(this,"Zoom reset",Toast.LENGTH_SHORT).show();}
+
+    private void zoomMenu(){
+        String[] levels={"Reset (1×)","2× zoom","3× zoom","4× zoom","How to use"};
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Pinch zoom · up to 4×").setItems(levels,(dialog,index)->{
+            if(index<4){zoomScale=index+1f;if(zoomScale<=1f)videoPanX=videoPanY=0;applyVideoZoom();Toast.makeText(this,"Zoom "+(index+1)+"×",Toast.LENGTH_SHORT).show();}
+            else Toast.makeText(this,"Pinch with two fingers to zoom. Drag while zoomed to inspect.",Toast.LENGTH_LONG).show();
+        }).show();
+    }
 
     private void jump(long amount){long len=Math.max(0,player.getLength());player.setTime(Math.max(0,Math.min(len,player.getTime()+amount)));hint.setText(amount>0?"+10 seconds":"−10 seconds");hint.setVisibility(View.VISIBLE);handler.postDelayed(()->hint.setVisibility(View.GONE),550);}
     private void speedMenu(TextView anchor){PopupMenu m=new PopupMenu(this,anchor);float[] s={.25f,.5f,.75f,1f,1.25f,1.5f,2f};for(int i=0;i<s.length;i++)m.getMenu().add(0,i,i,s[i]+"×");m.setOnMenuItemClickListener(x->{float n=s[x.getItemId()];selectedRate=n;preferences.edit().putFloat("playback_rate",n).apply();player.setRate(n);anchor.setText(n==1f?"1×":n+"×");return true;});m.show();}
