@@ -784,31 +784,44 @@ public class PlayerActivity extends AppCompatActivity {
         private final Paint iconPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         PlaybackControlView(Context context,String action){
             super(context);setText(action);setGravity(Gravity.CENTER);setContentDescription(action);
-            iconPaint.setColor(Color.WHITE);iconPaint.setStrokeWidth(dp(2));iconPaint.setStrokeCap(Paint.Cap.ROUND);iconPaint.setStrokeJoin(Paint.Join.ROUND);
+            iconPaint.setColor(Color.WHITE);iconPaint.setStrokeCap(Paint.Cap.ROUND);iconPaint.setStrokeJoin(Paint.Join.ROUND);
         }
         @Override protected void onDraw(Canvas canvas){
             float cx=getWidth()/2f,cy=getHeight()/2f,u=Math.min(getWidth(),getHeight())/48f;
             String action=getText().toString();
-            iconPaint.setStyle(Paint.Style.STROKE);iconPaint.setStrokeWidth(2.4f*u);
+            iconPaint.setColor(Color.WHITE);iconPaint.setStyle(Paint.Style.STROKE);iconPaint.setStrokeWidth(3.1f*u);
             if(action.contains("10")){
-                float left=cx-12*u,top=cy-12*u,right=cx+12*u,bottom=cy+12*u;
-                float start=action.startsWith("↶")?42f:138f,sweep=action.startsWith("↶")?-285f:285f;
-                canvas.drawArc(left,top,right,bottom,start,sweep,false,iconPaint);
+                boolean backward=action.startsWith("↶");
+                float radius=12*u;
+                canvas.drawArc(cx-radius,cy-radius,cx+radius,cy+radius,backward?-62f:-118f,backward?-275f:275f,false,iconPaint);
                 android.graphics.Path arrow=new android.graphics.Path();
-                if(action.startsWith("↶")){arrow.moveTo(cx-10*u,cy-9*u);arrow.lineTo(cx-15*u,cy-7*u);arrow.lineTo(cx-12*u,cy-2*u);}
-                else{arrow.moveTo(cx+10*u,cy-9*u);arrow.lineTo(cx+15*u,cy-7*u);arrow.lineTo(cx+12*u,cy-2*u);}
+                if(backward){
+                    arrow.moveTo(cx-7*u,cy-13*u);arrow.lineTo(cx-15*u,cy-13*u);arrow.lineTo(cx-12*u,cy-5*u);
+                }else{
+                    arrow.moveTo(cx+7*u,cy-13*u);arrow.lineTo(cx+15*u,cy-13*u);arrow.lineTo(cx+12*u,cy-5*u);
+                }
                 iconPaint.setStyle(Paint.Style.FILL);canvas.drawPath(arrow,iconPaint);
-                iconPaint.setTextAlign(Paint.Align.CENTER);iconPaint.setTextSize(15*u);iconPaint.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT,android.graphics.Typeface.BOLD));canvas.drawText("10",cx,cy+5*u,iconPaint);
+                iconPaint.setTextAlign(Paint.Align.CENTER);iconPaint.setTextSize(15.5f*u);
+                iconPaint.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT,android.graphics.Typeface.BOLD));
+                canvas.drawText("10",cx,cy+5.5f*u,iconPaint);
             }else if(action.equals("▶")||action.equals("Ⅱ")){
                 iconPaint.setStyle(Paint.Style.FILL);
-                if(action.equals("▶")){android.graphics.Path p=new android.graphics.Path();p.moveTo(cx-7*u,cy-11*u);p.lineTo(cx+11*u,cy);p.lineTo(cx-7*u,cy+11*u);p.close();canvas.drawPath(p,iconPaint);}
-                else{canvas.drawRoundRect(cx-8*u,cy-11*u,cx-2*u,cy+11*u,2*u,2*u,iconPaint);canvas.drawRoundRect(cx+2*u,cy-11*u,cx+8*u,cy+11*u,2*u,2*u,iconPaint);}
+                if(action.equals("▶")){
+                    android.graphics.Path p=new android.graphics.Path();
+                    p.moveTo(cx-8*u,cy-13*u);p.lineTo(cx+12*u,cy);p.lineTo(cx-8*u,cy+13*u);p.close();canvas.drawPath(p,iconPaint);
+                }else{
+                    canvas.drawRoundRect(cx-9*u,cy-13*u,cx-2.5f*u,cy+13*u,2.5f*u,2.5f*u,iconPaint);
+                    canvas.drawRoundRect(cx+2.5f*u,cy-13*u,cx+9*u,cy+13*u,2.5f*u,2.5f*u,iconPaint);
+                }
             }else{
                 boolean previous=action.startsWith("|");
-                iconPaint.setStyle(Paint.Style.FILL);float direction=previous?-1f:1f;
-                float barX=cx+direction*10*u;canvas.drawRoundRect(barX-1.5f*u,cy-11*u,barX+1.5f*u,cy+11*u,1.5f*u,1.5f*u,iconPaint);
+                iconPaint.setStyle(Paint.Style.FILL);
+                float barX=previous?cx-11*u:cx+11*u;
+                canvas.drawRoundRect(barX-1.8f*u,cy-12*u,barX+1.8f*u,cy+12*u,1.8f*u,1.8f*u,iconPaint);
                 android.graphics.Path p=new android.graphics.Path();
-                p.moveTo(cx-direction*9*u,cy-11*u);p.lineTo(cx+direction*7*u,cy);p.lineTo(cx-direction*9*u,cy+11*u);p.close();canvas.drawPath(p,iconPaint);
+                if(previous){p.moveTo(cx+9*u,cy-12*u);p.lineTo(cx-7*u,cy);p.lineTo(cx+9*u,cy+12*u);}
+                else{p.moveTo(cx-9*u,cy-12*u);p.lineTo(cx+7*u,cy);p.lineTo(cx-9*u,cy+12*u);}
+                p.close();canvas.drawPath(p,iconPaint);
             }
         }
     }
