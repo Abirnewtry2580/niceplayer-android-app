@@ -537,7 +537,8 @@ public class PlayerActivity extends AppCompatActivity {
         else{top.setVisibility(View.VISIBLE);bottom.setVisibility(View.VISIBLE);((View)quickTools.getTag()).setVisibility(View.VISIBLE);screenshotButton.setVisibility(View.VISIBLE);lock.setVisibility(View.VISIBLE);controls=true;}
     }
     private void moreMenu(TextView anchor){
-        PopupMenu m=new PopupMenu(this,anchor);
+        android.view.ContextThemeWrapper popupContext=new android.view.ContextThemeWrapper(this,R.style.NicePlayerPopupTheme);
+        PopupMenu m=new PopupMenu(popupContext,anchor);
         m.getMenu().add(0,1,0,"Audio track");
         m.getMenu().add(0,2,1,"Subtitles");
         m.getMenu().add(0,3,2,"Sleep timer");
