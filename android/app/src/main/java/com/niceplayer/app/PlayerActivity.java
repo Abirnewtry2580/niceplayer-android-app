@@ -8,9 +8,6 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.app.PictureInPictureParams;
-import android.app.RemoteAction;
-import android.app.PendingIntent;
-import android.graphics.drawable.Icon;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
@@ -80,6 +77,8 @@ public class PlayerActivity extends AppCompatActivity {
     private float[] equalizerGains;
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
     private boolean waveformEnabled, pipTransitionPending;
+    private long pipPlaybackPosition = -1;
+    private boolean pipWasPlaying;
     private float waveformDragStartX, waveformDragStartY, waveformStartX, waveformStartY;
     private long pointA = -1, pointB = -1, audioDelay, subtitleDelay;
     private boolean resumeAfterWaveform;
@@ -268,6 +267,14 @@ public class PlayerActivity extends AppCompatActivity {
         if (at > 5000 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
         else edit.remove(positionKey());
         edit.apply();
+    }
+    private void savePositionImmediately() {
+        if (player == null || sourceUri == null) return;
+        long at = player.getTime(), length = player.getLength();
+        SharedPreferences.Editor edit = preferences.edit();
+        if (at > 0 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
+        else edit.remove(positionKey());
+        edit.commit();
     }
     private void recordHistory(){String uri=sourceUri.toString(),name=currentTitle();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();uris.add(uri);names.add(name);for(int i=0;i<12;i++){String old=preferences.getString("history_uri_"+i,null);if(old!=null&&!old.equals(uri)){uris.add(old);names.add(preferences.getString("history_name_"+i,"Video"));if(uris.size()==12)break;}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
 
@@ -628,17 +635,16 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void enterPip(){
         if(Build.VERSION.SDK_INT<26||pipTransitionPending||isInPictureInPictureMode())return;
+        pipPlaybackPosition=player==null?-1:Math.max(0,player.getTime());
+        pipWasPlaying=player!=null&&player.isPlaying();
+        savePositionImmediately();
         pipTransitionPending=true;
         hidePlayerOverlaysForPip();
         final android.view.ViewTreeObserver.OnPreDrawListener[] listener=new android.view.ViewTreeObserver.OnPreDrawListener[1];
         listener[0]=()->{
             if(root.getViewTreeObserver().isAlive())root.getViewTreeObserver().removeOnPreDrawListener(listener[0]);
             root.postOnAnimation(()->root.postOnAnimation(()->{
-                ArrayList<RemoteAction> actions=new ArrayList<>();
-                actions.add(pipAction(PlaybackService.PREVIOUS,"Previous",android.R.drawable.ic_media_previous,21));
-                actions.add(pipAction(PlaybackService.PLAY_PAUSE,"Play/Pause",android.R.drawable.ic_media_play,22));
-                actions.add(pipAction(PlaybackService.NEXT,"Next",android.R.drawable.ic_media_next,23));
-                PictureInPictureParams.Builder builder=new PictureInPictureParams.Builder().setAspectRatio(new Rational(16,9)).setActions(actions);
+                PictureInPictureParams.Builder builder=new PictureInPictureParams.Builder().setAspectRatio(new Rational(16,9));
                 if(Build.VERSION.SDK_INT>=31)builder.setSeamlessResizeEnabled(false);
                 boolean entered=enterPictureInPictureMode(builder.build());
                 if(!entered){pipTransitionPending=false;restorePlayerOverlaysAfterPipFailure();}
@@ -647,7 +653,6 @@ public class PlayerActivity extends AppCompatActivity {
         };
         root.getViewTreeObserver().addOnPreDrawListener(listener[0]);
     }
-    private RemoteAction pipAction(String action,String label,int icon,int request){Intent i=new Intent(action).setPackage(getPackageName());PendingIntent p=PendingIntent.getBroadcast(this,request,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);return new RemoteAction(Icon.createWithResource(this,icon),label,label,p);}
     private void createPreviewSheet(){
         Toast.makeText(this,"Creating preview sheet…",Toast.LENGTH_SHORT).show();Uri uri=sourceUri;String displayName=currentTitle();
         worker.execute(()->{Bitmap sheet=null;try(ParcelFileDescriptor fd=getContentResolver().openFileDescriptor(uri,"r")){
@@ -689,6 +694,10 @@ public class PlayerActivity extends AppCompatActivity {
         pipTransitionPending=false;
         if(inPictureInPictureMode){
             hidePlayerOverlaysForPip();
+            if(player!=null&&pipPlaybackPosition>0&&player.getTime()+1500<pipPlaybackPosition){
+                player.setTime(pipPlaybackPosition);
+            }
+            if(player!=null&&pipWasPlaying&&!player.isPlaying())player.play();
         }else if(!locked){
             restorePlayerOverlaysAfterPipFailure();
         }
