@@ -431,7 +431,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private TextView addControl(LinearLayout row,String text,int size,View.OnClickListener click,int slotWidth){
-        FrameLayout slot=new FrameLayout(this);TextView v=label(text,size);v.setShadowLayer(dp(4),0,dp(1),Color.BLACK);
+        FrameLayout slot=new FrameLayout(this);TextView v=new PlaybackControlView(this,text);
         GradientDrawable circle=new GradientDrawable();circle.setShape(GradientDrawable.OVAL);circle.setColor(0x8C111827);circle.setStroke(dp(1),0x66FFFFFF);v.setBackground(circle);
         v.setOnTouchListener((buttonView,event)->{
             int action=event.getActionMasked();
@@ -780,5 +780,37 @@ public class PlayerActivity extends AppCompatActivity {
         }
     }
     @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null&&player!=null){player.setEqualizer(null);cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
+    private class PlaybackControlView extends TextView{
+        private final Paint iconPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        PlaybackControlView(Context context,String action){
+            super(context);setText(action);setGravity(Gravity.CENTER);setContentDescription(action);
+            iconPaint.setColor(Color.WHITE);iconPaint.setStrokeWidth(dp(2));iconPaint.setStrokeCap(Paint.Cap.ROUND);iconPaint.setStrokeJoin(Paint.Join.ROUND);
+        }
+        @Override protected void onDraw(Canvas canvas){
+            float cx=getWidth()/2f,cy=getHeight()/2f,u=Math.min(getWidth(),getHeight())/48f;
+            String action=getText().toString();
+            iconPaint.setStyle(Paint.Style.STROKE);iconPaint.setStrokeWidth(2.4f*u);
+            if(action.contains("10")){
+                float left=cx-12*u,top=cy-12*u,right=cx+12*u,bottom=cy+12*u;
+                float start=action.startsWith("↶")?42f:138f,sweep=action.startsWith("↶")?-285f:285f;
+                canvas.drawArc(left,top,right,bottom,start,sweep,false,iconPaint);
+                android.graphics.Path arrow=new android.graphics.Path();
+                if(action.startsWith("↶")){arrow.moveTo(cx-10*u,cy-9*u);arrow.lineTo(cx-15*u,cy-7*u);arrow.lineTo(cx-12*u,cy-2*u);}
+                else{arrow.moveTo(cx+10*u,cy-9*u);arrow.lineTo(cx+15*u,cy-7*u);arrow.lineTo(cx+12*u,cy-2*u);}
+                iconPaint.setStyle(Paint.Style.FILL);canvas.drawPath(arrow,iconPaint);
+                iconPaint.setTextAlign(Paint.Align.CENTER);iconPaint.setTextSize(15*u);iconPaint.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT,android.graphics.Typeface.BOLD));canvas.drawText("10",cx,cy+5*u,iconPaint);
+            }else if(action.equals("▶")||action.equals("Ⅱ")){
+                iconPaint.setStyle(Paint.Style.FILL);
+                if(action.equals("▶")){android.graphics.Path p=new android.graphics.Path();p.moveTo(cx-7*u,cy-11*u);p.lineTo(cx+11*u,cy);p.lineTo(cx-7*u,cy+11*u);p.close();canvas.drawPath(p,iconPaint);}
+                else{canvas.drawRoundRect(cx-8*u,cy-11*u,cx-2*u,cy+11*u,2*u,2*u,iconPaint);canvas.drawRoundRect(cx+2*u,cy-11*u,cx+8*u,cy+11*u,2*u,2*u,iconPaint);}
+            }else{
+                boolean previous=action.startsWith("|");
+                iconPaint.setStyle(Paint.Style.FILL);float direction=previous?-1f:1f;
+                float barX=cx+direction*10*u;canvas.drawRoundRect(barX-1.5f*u,cy-11*u,barX+1.5f*u,cy+11*u,1.5f*u,1.5f*u,iconPaint);
+                android.graphics.Path p=new android.graphics.Path();
+                p.moveTo(cx-direction*9*u,cy-11*u);p.lineTo(cx+direction*7*u,cy);p.lineTo(cx-direction*9*u,cy+11*u);p.close();canvas.drawPath(p,iconPaint);
+            }
+        }
+    }
     private int dp(int n){return Math.round(n*getResources().getDisplayMetrics().density);}
 }
