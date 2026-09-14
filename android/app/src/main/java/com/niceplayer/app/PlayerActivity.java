@@ -692,7 +692,26 @@ public class PlayerActivity extends AppCompatActivity {
             control.setText("ROTATION\nLOCK");Toast.makeText(this,"Auto-rotate enabled",Toast.LENGTH_SHORT).show();
         }
     }
-    private void screenshot(){if(Build.VERSION.SDK_INT<26){Toast.makeText(this,"Android 8 or newer required",Toast.LENGTH_SHORT).show();return;}Bitmap b=Bitmap.createBitmap(root.getWidth(),root.getHeight(),Bitmap.Config.ARGB_8888);PixelCopy.request(getWindow(),b,r->{if(r==PixelCopy.SUCCESS)save(b);else{b.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}},handler);}
+    private void screenshot(){
+        View videoSurface=findVideoSurface(video);
+        if(videoSurface==null||videoSurface.getWidth()<=0||videoSurface.getHeight()<=0){Toast.makeText(this,"Video frame is not ready",Toast.LENGTH_SHORT).show();return;}
+        Bitmap bitmap=Bitmap.createBitmap(videoSurface.getWidth(),videoSurface.getHeight(),Bitmap.Config.ARGB_8888);
+        if(videoSurface instanceof TextureView){
+            Bitmap frame=((TextureView)videoSurface).getBitmap(bitmap);
+            if(frame!=null)save(frame);else{bitmap.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}
+            return;
+        }
+        if(Build.VERSION.SDK_INT>=24&&videoSurface instanceof SurfaceView){
+            PixelCopy.request((SurfaceView)videoSurface,bitmap,result->{if(result==PixelCopy.SUCCESS)save(bitmap);else{bitmap.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}},handler);
+            return;
+        }
+        bitmap.recycle();Toast.makeText(this,"Video-only screenshot is unavailable on this device",Toast.LENGTH_SHORT).show();
+    }
+    private View findVideoSurface(View view){
+        if(view instanceof SurfaceView||view instanceof TextureView)return view;
+        if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++){View found=findVideoSurface(group.getChildAt(i));if(found!=null)return found;}}
+        return null;
+    }
     private void save(Bitmap b){try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"NicePlayer_"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/NicePlayer");Uri u=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(u==null)throw new Exception();try(OutputStream s=getContentResolver().openOutputStream(u)){if(s==null||!b.compress(Bitmap.CompressFormat.JPEG,94,s))throw new Exception();}Toast.makeText(this,"Screenshot saved",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Could not save screenshot",Toast.LENGTH_LONG).show();}finally{b.recycle();}}
     private void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
     @Override protected void onPause(){savePosition();super.onPause();}
