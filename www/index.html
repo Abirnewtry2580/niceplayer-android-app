@@ -409,14 +409,14 @@
         const folderGrid = document.getElementById('folderGrid');
         const deviceVideoList = document.getElementById('deviceVideoList');
         const libraryEmpty = document.getElementById('libraryEmpty');
-        let deviceFolders = [], visibleDeviceVideos = [], currentFolder = null, showHiddenOnly = false;
+        let deviceFolders = [], visibleDeviceVideos = [], currentFolder = null, currentFolderIsHidden = false, showHiddenOnly = false;
         let libraryView = localStorage.getItem('library_view') || 'detailed';
 
         function storedList(key){try{const value=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(value)?value:[];}catch(error){return [];}}
         function hiddenWords(){return storedList('hidden_words').map(word=>String(word).trim().toLowerCase()).filter(Boolean);}
         function itemHiddenId(kind,item){return (kind==='folder'?'folder:':'video:')+(kind==='folder'?item.bucketId:item.uri);}
         function keywordMatches(item){const name=String(item&&item.name||'').toLowerCase();return hiddenWords().some(word=>name.includes(word));}
-        function isKeywordHidden(kind,item){return keywordMatches(item)&&!storedList('hidden_word_exceptions').includes(itemHiddenId(kind,item));}
+        function isKeywordHidden(kind,item){const incomplete=kind==='folder'?item.hasRunningDownloads:item.isDownloading;return !incomplete&&keywordMatches(item)&&!storedList('hidden_word_exceptions').includes(itemHiddenId(kind,item));}
         function isManuallyHidden(kind,item){const key=kind==='folder'?'hidden_folders':'hidden_videos',id=kind==='folder'?item.bucketId:item.uri;return storedList(key).includes(id);}
         function isHidden(kind,item){return isManuallyHidden(kind,item)||isKeywordHidden(kind,item);}
         function playedVideoUris(){return storedList('played_video_uris');}
@@ -501,10 +501,11 @@
             applyLibraryView();
         }
 
-        function showVideoFolders() { visibleDeviceVideos = []; renderFolderCards(deviceFolders); }
+        function showVideoFolders() { visibleDeviceVideos = []; currentFolder=null;currentFolderIsHidden=false;renderFolderCards(deviceFolders); }
 
         async function showFolderVideos(folder) {
             currentFolder = folder;
+            currentFolderIsHidden=isHidden('folder',folder);
             const plugin = videoLibraryPlugin(); if (!plugin) return;
             document.getElementById('libraryTitle').innerText = folder.name;
             document.getElementById('librarySubtitle').innerText = 'Device folder';
@@ -521,7 +522,7 @@
 
         function renderVideoRows(videos) {
             deviceVideoList.innerHTML = '';
-            videos=videos.filter(video=>showHiddenOnly?isHidden('video',video):!isHidden('video',video));
+            videos=videos.filter(video=>currentFolderIsHidden||(showHiddenOnly?isHidden('video',video):!isHidden('video',video)));
             document.getElementById('sectionNote').innerText = videos.length + ' items';
             const duplicateCount={};videos.forEach(v=>{const key=v.name+'|'+v.size;duplicateCount[key]=(duplicateCount[key]||0)+1;});
             videos.forEach(item => {
@@ -543,6 +544,7 @@
                         await plugin.playVideo({
                             uri: item.uri,
                             title: item.name,
+                            privateMode: currentFolderIsHidden || isHidden('video',item),
                             index: videos.indexOf(item),
                             uris: videos.map(video => video.uri),
                             titles: videos.map(video => video.name)
@@ -580,7 +582,7 @@
             if(isHidden(kind,item)){manual=manual.filter(value=>value!==id);if(keywordMatches(item)&&!exceptions.includes(itemId))exceptions.push(itemId);}
             else{if(!manual.includes(id))manual.push(id);exceptions=exceptions.filter(value=>value!==itemId);}
             localStorage.setItem(key,JSON.stringify(manual));localStorage.setItem('hidden_word_exceptions',JSON.stringify(exceptions));
-            if(kind==='folder')renderFolderCards(deviceFolders);else renderVideoRows(visibleDeviceVideos);
+            if(kind==='folder')renderFolderCards(deviceFolders);else renderVideoRows(visibleDeviceVideos);loadPlaybackHistory();
         }
         function openViewMenu(){
             const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';
@@ -595,7 +597,7 @@
             if(answer===null)return;
             const words=[...new Set(answer.split(',').map(word=>word.trim().toLowerCase()).filter(Boolean))];
             localStorage.setItem('hidden_words',JSON.stringify(words));
-            if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);
+            if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);loadPlaybackHistory();
         }
         function setLibraryView(mode){if(mode==='hidden'){showHiddenOnly=true;}else{showHiddenOnly=false;libraryView=mode;localStorage.setItem('library_view',mode);}if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);}
         function applyLibraryView(){folderGrid.className='folder-grid view-'+libraryView;deviceVideoList.className='video-list view-'+libraryView;document.getElementById('viewModeButton').textContent=showHiddenOnly?'View: Hidden':'View: '+libraryView.charAt(0).toUpperCase()+libraryView.slice(1);}
@@ -626,7 +628,7 @@
         }
         function toggleFolderFavorite(id){let values=JSON.parse(localStorage.getItem('favorite_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('favorite_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
         function toggleFolderHidden(id){let values=JSON.parse(localStorage.getItem('hidden_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('hidden_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
-        async function loadPlaybackHistory(){const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),items=result.items||[];items.forEach(item=>markVideoPlayed(item.uri));if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>{markVideoPlayed(item.uri);plugin.playVideo({uri:item.uri,title:item.name,index:0,uris:[item.uri],titles:[item.name]});};strip.appendChild(card);});}catch(error){}}
+        async function loadPlaybackHistory(){const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),allItems=result.items||[],hiddenUris=[];const items=allItems.filter(item=>{const videoHidden=isHidden('video',{uri:item.uri,name:item.fileName||item.name,isDownloading:false}),folderHidden=item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||'',hasRunningDownloads:false});if(videoHidden||folderHidden){hiddenUris.push(item.uri);return false;}return true;});if(hiddenUris.length&&plugin.removeHistory)await plugin.removeHistory({uris:hiddenUris});items.forEach(item=>markVideoPlayed(item.uri));if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>{markVideoPlayed(item.uri);plugin.playVideo({uri:item.uri,title:item.name,privateMode:false,index:0,uris:[item.uri],titles:[item.name]});};strip.appendChild(card);});}catch(error){}}
 
         function setVideoSource(url) {
             if (activeVideoUrl) URL.revokeObjectURL(activeVideoUrl);

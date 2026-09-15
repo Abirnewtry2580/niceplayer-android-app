@@ -55,6 +55,7 @@ public class PlayerActivity extends AppCompatActivity {
     private GestureLevelView gestureLevel;
     private TextView play, currentTime, totalTime, remainingTime, hint, lock, title, screenshotButton;
     private boolean dragging, controls = true, locked, orientationLocked;
+    private boolean privateMode;
     private boolean softwareRetryAttempted;
     private Uri sourceUri;
     private ParcelFileDescriptor sourceDescriptor;
@@ -127,6 +128,7 @@ public class PlayerActivity extends AppCompatActivity {
         if (playlistTitles.isEmpty()) playlistTitles.add(getIntent().getStringExtra("title"));
         playlistIndex = Math.min(playlistIndex, playlistUris.size() - 1);
         preferences = getSharedPreferences("playback", MODE_PRIVATE);
+        privateMode = getIntent().getBooleanExtra("privateMode", false);
         soundProtection = preferences.getInt("sound_protection", 0);
         audioCleanup = preferences.getInt("audio_cleanup", 0);
         equalizerEnabled = preferences.getBoolean("equalizer_enabled", audioCleanup > 0);
@@ -157,7 +159,7 @@ public class PlayerActivity extends AppCompatActivity {
         player.attachViews(video, null, false, false);
         player.setEventListener(e -> runOnUiThread(() -> {
             if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
-            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();recordHistory();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService(); }
+            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService(); }
             else if (e.type == MediaPlayer.Event.EndReached) playAt(playlistIndex + 1);
         }));
         if (!startPlayback(true)) {
@@ -238,6 +240,7 @@ public class PlayerActivity extends AppCompatActivity {
     private String positionKey() { return "position_" + sourceUri; }
 
     private void restorePosition() {
+        if(privateMode){pendingSeek=-1;preferences.edit().remove(positionKey()).apply();return;}
         if (pendingSeek >= 0) {
             player.setTime(pendingSeek);
             pendingSeek = -1;
@@ -263,6 +266,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void savePosition() {
         if (player == null || sourceUri == null) return;
+        if(privateMode){forgetCurrentVideo();return;}
         long at = player.getTime(), length = player.getLength();
         SharedPreferences.Editor edit = preferences.edit();
         if (at > 5000 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
@@ -271,6 +275,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void savePositionImmediately() {
         if (player == null || sourceUri == null) return;
+        if(privateMode){forgetCurrentVideo();return;}
         long at = player.getTime(), length = player.getLength();
         SharedPreferences.Editor edit = preferences.edit();
         if (at > 0 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
@@ -278,6 +283,7 @@ public class PlayerActivity extends AppCompatActivity {
         edit.commit();
     }
     private void recordHistory(){String uri=sourceUri.toString(),name=currentTitle();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();uris.add(uri);names.add(name);for(int i=0;i<12;i++){String old=preferences.getString("history_uri_"+i,null);if(old!=null&&!old.equals(uri)){uris.add(old);names.add(preferences.getString("history_name_"+i,"Video"));if(uris.size()==12)break;}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
+    private void forgetCurrentVideo(){if(preferences==null||sourceUri==null)return;String hiddenUri=sourceUri.toString();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri!=null&&!uri.equals(hiddenUri)){uris.add(uri);names.add(preferences.getString("history_name_"+i,"Video"));}}SharedPreferences.Editor e=preferences.edit().remove("position_"+hiddenUri);for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
 
     private void playAt(int index) {
         if (index < 0 || index >= playlistUris.size()) {

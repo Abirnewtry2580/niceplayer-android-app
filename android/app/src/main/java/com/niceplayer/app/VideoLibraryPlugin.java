@@ -159,6 +159,7 @@ public class VideoLibraryPlugin extends Plugin {
         intent.setData(Uri.parse(uri));
         intent.putExtra("title", call.getString("title", "Video"));
         intent.putExtra("index", call.getInt("index", 0));
+        intent.putExtra("privateMode", call.getBoolean("privateMode", false));
         JSArray uriArray = call.getArray("uris");
         JSArray titleArray = call.getArray("titles");
         ArrayList<String> uris = new ArrayList<>();
@@ -182,9 +183,23 @@ public class VideoLibraryPlugin extends Plugin {
     public void getHistory(PluginCall call) {
         android.content.SharedPreferences preferences=getContext().getSharedPreferences("playback",android.content.Context.MODE_PRIVATE);
         JSArray items=new JSArray();
-        for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri==null)continue;JSObject item=new JSObject();item.put("uri",uri);item.put("name",preferences.getString("history_name_"+i,"Video"));item.put("position",preferences.getLong("position_"+uri,0));items.put(item);}
+        for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri==null)continue;JSObject item=new JSObject();item.put("uri",uri);item.put("name",preferences.getString("history_name_"+i,"Video"));item.put("position",preferences.getLong("position_"+uri,0));addHistoryMediaInfo(item,Uri.parse(uri));items.put(item);}
         JSObject result=new JSObject();result.put("items",items);call.resolve(result);
     }
+
+    @PluginMethod
+    public void removeHistory(PluginCall call) {
+        JSArray requested=call.getArray("uris");if(requested==null){call.reject("uris are required");return;}
+        java.util.HashSet<String> removed=new java.util.HashSet<>();for(int i=0;i<requested.length();i++){String uri=requested.optString(i);if(uri!=null)removed.add(uri);}
+        android.content.SharedPreferences preferences=getContext().getSharedPreferences("playback",android.content.Context.MODE_PRIVATE);
+        ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();
+        for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri!=null&&!removed.contains(uri)){uris.add(uri);names.add(preferences.getString("history_name_"+i,"Video"));}}
+        android.content.SharedPreferences.Editor edit=preferences.edit();for(String uri:removed)edit.remove("position_"+uri);
+        for(int i=0;i<12;i++){if(i<uris.size()){edit.putString("history_uri_"+i,uris.get(i));edit.putString("history_name_"+i,names.get(i));}else{edit.remove("history_uri_"+i);edit.remove("history_name_"+i);}}
+        edit.apply();JSObject result=new JSObject();result.put("success",true);call.resolve(result);
+    }
+
+    private void addHistoryMediaInfo(JSObject item,Uri uri){String[] projection={MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.DISPLAY_NAME};try(Cursor cursor=getContext().getContentResolver().query(uri,projection,null,null,null)){if(cursor!=null&&cursor.moveToFirst()){int bucketId=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID),bucketName=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME),name=cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME);if(bucketId>=0)item.put("bucketId",cursor.getString(bucketId));if(bucketName>=0)item.put("bucketName",cursor.getString(bucketName));if(name>=0)item.put("fileName",cursor.getString(name));}}catch(Exception ignored){}}
 
     @PluginMethod
     public void saveImage(PluginCall call) {
@@ -262,10 +277,9 @@ public class VideoLibraryPlugin extends Plugin {
     private void queryFolders(PluginCall call) {
         ContentResolver resolver = getContext().getContentResolver();
         Uri collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
-        String[] projection = {
-            MediaStore.Video.Media.BUCKET_ID,
-            MediaStore.Video.Media.BUCKET_DISPLAY_NAME
-        };
+        String[] projection = Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
+                ? new String[]{MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.IS_PENDING}
+                : new String[]{MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.DISPLAY_NAME};
         Map<String, Folder> grouped = new LinkedHashMap<>();
 
         try (Cursor cursor = resolver.query(collection, projection, null, null,
@@ -273,6 +287,7 @@ public class VideoLibraryPlugin extends Plugin {
             if (cursor != null) {
                 int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_ID);
                 int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
+                int fileNameColumn=cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME),pendingColumn=cursor.getColumnIndex(MediaStore.Video.Media.IS_PENDING);
                 while (cursor.moveToNext()) {
                     String id = cursor.getString(idColumn);
                     String name = cursor.getString(nameColumn);
@@ -280,6 +295,8 @@ public class VideoLibraryPlugin extends Plugin {
                     Folder folder = grouped.get(id);
                     if (folder == null) { folder = new Folder(id, name); grouped.put(id, folder); }
                     folder.count++;
+                    String fileName=fileNameColumn>=0?cursor.getString(fileNameColumn):null;
+                    if((pendingColumn>=0&&cursor.getInt(pendingColumn)!=0)||looksIncomplete(fileName))folder.hasRunningDownloads=true;
                 }
             }
             JSArray folders = new JSArray();
@@ -288,6 +305,7 @@ public class VideoLibraryPlugin extends Plugin {
                 item.put("bucketId", folder.id);
                 item.put("name", folder.name);
                 item.put("count", folder.count);
+                item.put("hasRunningDownloads",folder.hasRunningDownloads);
                 folders.put(item);
             }
             JSObject result = new JSObject(); result.put("folders", folders); call.resolve(result);
@@ -300,12 +318,9 @@ public class VideoLibraryPlugin extends Plugin {
         String bucketId = call.getString("bucketId");
         if (bucketId == null) { call.reject("bucketId is required"); return; }
 
-        String[] projection = {
-            MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.SIZE,
-            MediaStore.Video.Media.DURATION
-        };
+        String[] projection = Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
+                ? new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.IS_PENDING}
+                : new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION};
         String selection = MediaStore.Video.Media.BUCKET_ID + "=?";
         JSArray videos = new JSArray();
 
@@ -317,12 +332,14 @@ public class VideoLibraryPlugin extends Plugin {
                 int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
                 int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
                 int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
+                int pendingColumn=cursor.getColumnIndex(MediaStore.Video.Media.IS_PENDING);
                 while (cursor.moveToNext()) {
                     long id = cursor.getLong(idColumn);
                     JSObject item = new JSObject();
-                    item.put("name", cursor.getString(nameColumn));
+                    String displayName=cursor.getString(nameColumn);item.put("name",displayName);
                     item.put("size", cursor.getLong(sizeColumn));
                     item.put("duration", cursor.getLong(durationColumn));
+                    item.put("isDownloading",(pendingColumn>=0&&cursor.getInt(pendingColumn)!=0)||looksIncomplete(displayName));
                     Uri videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
                     item.put("uri", videoUri.toString());
                     videos.put(item);
@@ -331,6 +348,8 @@ public class VideoLibraryPlugin extends Plugin {
             JSObject result = new JSObject(); result.put("videos", videos); call.resolve(result);
         } catch (Exception error) { call.reject("Could not read folder", error); }
     }
+
+    private boolean looksIncomplete(String name){if(name==null)return false;String value=name.toLowerCase(java.util.Locale.US);return value.endsWith(".part")||value.endsWith(".download")||value.endsWith(".crdownload")||value.endsWith(".tmp")||value.endsWith(".partial");}
 
     @PluginMethod
     public void getThumbnail(PluginCall call) {
@@ -364,7 +383,7 @@ public class VideoLibraryPlugin extends Plugin {
     }
 
     private static class Folder {
-        final String id; final String name; int count = 0;
+        final String id; final String name; int count = 0; boolean hasRunningDownloads;
         Folder(String id, String name) { this.id = id; this.name = name; }
     }
 }
