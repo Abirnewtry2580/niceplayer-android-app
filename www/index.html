@@ -135,6 +135,10 @@
         .action-sheet { width:100%; padding:18px 16px 24px; border-radius:24px 24px 0 0; background:#111827; box-shadow:0 -15px 45px rgba(0,0,0,.4); }
         .action-title { margin:0 5px 13px; overflow:hidden; color:#e2e8f0; font-weight:750; white-space:nowrap; text-overflow:ellipsis; }
         .action-sheet button { width:100%; margin:5px 0; padding:14px; border:0; border-radius:14px; color:#fff; background:#263247; font-size:15px; }
+        .action-help { margin:0 5px 13px; color:#94a3b8; font-size:12px; line-height:1.5; }
+        .action-input { width:100%; min-height:120px; margin:0 0 10px; padding:13px; resize:vertical; outline:none; border:1px solid rgba(255,255,255,.14); border-radius:14px; background:#0b1220; color:#f8fafc; caret-color:#22d3ee; font:14px/1.5 inherit; user-select:text; }
+        .action-input:focus { border-color:#22d3ee; box-shadow:0 0 0 3px rgba(34,211,238,.12); }
+        .action-sheet .primary { color:#06121b; background:#22d3ee; font-weight:800; }
         .action-sheet .danger { color:#fecaca; background:#451a1a; }
         .folder-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
         .folder-card { position:relative; overflow:hidden; min-height:122px; padding:16px; border:1px solid rgba(255,255,255,.09); border-radius:19px; text-align:left; color:#fff; background:linear-gradient(145deg,rgba(30,41,59,.84),rgba(15,23,42,.64)); box-shadow:0 13px 36px rgba(0,0,0,.23); }
@@ -593,11 +597,19 @@
             sheet.querySelector('[data-action="words"]').onclick=()=>{shade.remove();editHiddenWords();};
         }
         function editHiddenWords(){
-            const current=hiddenWords().join(', '),answer=prompt('Enter words separated by commas. Files or folders containing these words will be hidden only inside NicePlayer.',current);
-            if(answer===null)return;
-            const words=[...new Set(answer.split(',').map(word=>word.trim().toLowerCase()).filter(Boolean))];
-            localStorage.setItem('hidden_words',JSON.stringify(words));
-            if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);loadPlaybackHistory();
+            const shade=document.createElement('div');shade.className='action-shade';
+            const sheet=document.createElement('div');sheet.className='action-sheet';
+            sheet.innerHTML='<div class="action-title">Hidden words</div><div class="action-help">Enter words separated by commas. Matching files and folders will be hidden only inside NicePlayer.</div><textarea class="action-input" placeholder="Example: private, personal, secret"></textarea><button class="primary" data-action="save">Save</button><button data-action="cancel">Cancel</button>';
+            const input=sheet.querySelector('.action-input');input.value=hiddenWords().join(', ');
+            shade.appendChild(sheet);document.body.appendChild(shade);
+            const close=()=>shade.remove();
+            shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')close();});
+            sheet.querySelector('[data-action="save"]').onclick=()=>{
+                const words=[...new Set(input.value.split(',').map(word=>word.trim().toLowerCase()).filter(Boolean))];
+                localStorage.setItem('hidden_words',JSON.stringify(words));close();
+                if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);loadPlaybackHistory();
+            };
+            setTimeout(()=>input.focus(),50);
         }
         function setLibraryView(mode){if(mode==='hidden'){showHiddenOnly=true;}else{showHiddenOnly=false;libraryView=mode;localStorage.setItem('library_view',mode);}if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);}
         function applyLibraryView(){folderGrid.className='folder-grid view-'+libraryView;deviceVideoList.className='video-list view-'+libraryView;document.getElementById('viewModeButton').textContent=showHiddenOnly?'View: Hidden':'View: '+libraryView.charAt(0).toUpperCase()+libraryView.slice(1);}

@@ -26,7 +26,10 @@
 
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">#050812</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_transparent</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:windowBackground">#050812</item>
     </style>
     <style name="NicePlayerDialogTheme" parent="ThemeOverlay.AppCompat.Dialog.Alert">
         <item name="android:colorBackground">#0B1220</item>
