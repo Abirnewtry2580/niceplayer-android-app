@@ -313,6 +313,7 @@ public class VideoLibraryPlugin extends Plugin {
                     String id = cursor.getString(idColumn);
                     String name = cursor.getString(nameColumn);
                     if (name == null || name.trim().isEmpty()) name = "Videos";
+                    if (name.trim().startsWith(".")) continue;
                     Folder folder = grouped.get(id);
                     if (folder == null) { folder = new Folder(id, name); grouped.put(id, folder); }
                     folder.count++;
@@ -367,12 +368,14 @@ public class VideoLibraryPlugin extends Plugin {
                 int bucketColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID),bucketNameColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
                 while (cursor.moveToNext()) {
                     long id = cursor.getLong(idColumn);
+                    String bucketName=bucketNameColumn>=0?cursor.getString(bucketNameColumn):null;
+                    if(bucketName!=null&&bucketName.trim().startsWith("."))continue;
                     JSObject item = new JSObject();
                     String displayName=cursor.getString(nameColumn);item.put("name",displayName);
                     item.put("size", cursor.getLong(sizeColumn));
                     item.put("duration", cursor.getLong(durationColumn));
                     if(bucketColumn>=0)item.put("bucketId",cursor.getString(bucketColumn));
-                    if(bucketNameColumn>=0)item.put("bucketName",cursor.getString(bucketNameColumn));
+                    if(bucketNameColumn>=0)item.put("bucketName",bucketName);
                     item.put("isDownloading",(pendingColumn>=0&&cursor.getInt(pendingColumn)!=0)||looksIncomplete(displayName));
                     Uri videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
                     item.put("uri", videoUri.toString());
