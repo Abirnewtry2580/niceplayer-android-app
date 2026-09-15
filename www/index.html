@@ -416,7 +416,7 @@
         function hiddenWords(){return storedList('hidden_words').map(word=>String(word).trim().toLowerCase()).filter(Boolean);}
         function itemHiddenId(kind,item){return (kind==='folder'?'folder:':'video:')+(kind==='folder'?item.bucketId:item.uri);}
         function keywordMatches(item){const name=String(item&&item.name||'').toLowerCase();return hiddenWords().some(word=>name.includes(word));}
-        function isKeywordHidden(kind,item){const incomplete=kind==='folder'?item.hasRunningDownloads:item.isDownloading;return !incomplete&&keywordMatches(item)&&!storedList('hidden_word_exceptions').includes(itemHiddenId(kind,item));}
+        function isKeywordHidden(kind,item){return keywordMatches(item)&&!storedList('hidden_word_exceptions').includes(itemHiddenId(kind,item));}
         function isManuallyHidden(kind,item){const key=kind==='folder'?'hidden_folders':'hidden_videos',id=kind==='folder'?item.bucketId:item.uri;return storedList(key).includes(id);}
         function isHidden(kind,item){return isManuallyHidden(kind,item)||isKeywordHidden(kind,item);}
         function playedVideoUris(){return storedList('played_video_uris');}
