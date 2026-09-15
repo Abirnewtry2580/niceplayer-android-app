@@ -299,7 +299,7 @@ public class VideoLibraryPlugin extends Plugin {
         ContentResolver resolver = getContext().getContentResolver();
         Uri collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
         String[] projection = Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
-                ? new String[]{MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.IS_PENDING}
+                ? new String[]{MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.IS_PENDING,MediaStore.Video.Media.RELATIVE_PATH}
                 : new String[]{MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.DISPLAY_NAME};
         Map<String, Folder> grouped = new LinkedHashMap<>();
 
@@ -308,12 +308,13 @@ public class VideoLibraryPlugin extends Plugin {
             if (cursor != null) {
                 int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_ID);
                 int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
-                int fileNameColumn=cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME),pendingColumn=cursor.getColumnIndex(MediaStore.Video.Media.IS_PENDING);
+                int fileNameColumn=cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME),pendingColumn=cursor.getColumnIndex(MediaStore.Video.Media.IS_PENDING),relativePathColumn=cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH);
                 while (cursor.moveToNext()) {
                     String id = cursor.getString(idColumn);
                     String name = cursor.getString(nameColumn);
                     if (name == null || name.trim().isEmpty()) name = "Videos";
-                    if(name.trim().startsWith("."))continue;
+                    String relativePath=relativePathColumn>=0?cursor.getString(relativePathColumn):null;
+                    if(name.trim().startsWith(".")||containsDotFolder(relativePath))continue;
                     Folder folder = grouped.get(id);
                     if (folder == null) { folder = new Folder(id, name); grouped.put(id, folder); }
                     folder.count++;
@@ -350,7 +351,7 @@ public class VideoLibraryPlugin extends Plugin {
 
     private void queryVideos(PluginCall call, String bucketId) {
         String[] projection = Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
-                ? new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.IS_PENDING,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME}
+                ? new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.IS_PENDING,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.RELATIVE_PATH}
                 : new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
         String selection = bucketId == null ? null : MediaStore.Video.Media.BUCKET_ID + "=?";
         String[] selectionArgs = bucketId == null ? null : new String[]{bucketId};
@@ -365,11 +366,12 @@ public class VideoLibraryPlugin extends Plugin {
                 int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
                 int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
                 int pendingColumn=cursor.getColumnIndex(MediaStore.Video.Media.IS_PENDING);
-                int bucketColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID),bucketNameColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
+                int bucketColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID),bucketNameColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME),relativePathColumn=cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH);
                 while (cursor.moveToNext()) {
                     long id = cursor.getLong(idColumn);
                     String bucketName=bucketNameColumn>=0?cursor.getString(bucketNameColumn):null;
-                    if(bucketName!=null&&bucketName.trim().startsWith("."))continue;
+                    String relativePath=relativePathColumn>=0?cursor.getString(relativePathColumn):null;
+                    if((bucketName!=null&&bucketName.trim().startsWith("."))||containsDotFolder(relativePath))continue;
                     JSObject item = new JSObject();
                     String displayName=cursor.getString(nameColumn);item.put("name",displayName);
                     item.put("size", cursor.getLong(sizeColumn));
@@ -387,6 +389,15 @@ public class VideoLibraryPlugin extends Plugin {
     }
 
     private boolean looksIncomplete(String name){if(name==null)return false;String value=name.toLowerCase(java.util.Locale.US);return value.endsWith(".part")||value.endsWith(".download")||value.endsWith(".crdownload")||value.endsWith(".tmp")||value.endsWith(".partial");}
+
+    private boolean containsDotFolder(String relativePath){
+        if(relativePath==null||relativePath.trim().isEmpty())return false;
+        for(String part:relativePath.replace('\\','/').split("/")){
+            String name=part.trim();
+            if(name.length()>1&&name.startsWith("."))return true;
+        }
+        return false;
+    }
 
     @PluginMethod
     public void getThumbnail(PluginCall call) {
