@@ -53,7 +53,7 @@ public class PlayerActivity extends AppCompatActivity {
     private SeekBar seek;
     private WaveformView waveform;
     private GestureLevelView gestureLevel;
-    private TextView play, time, hint, lock, title, screenshotButton;
+    private TextView play, currentTime, totalTime, remainingTime, hint, lock, title, screenshotButton;
     private boolean dragging, controls = true, locked, orientationLocked;
     private boolean softwareRetryAttempted;
     private Uri sourceUri;
@@ -102,7 +102,7 @@ public class PlayerActivity extends AppCompatActivity {
                 seek.setMax((int)Math.min(Integer.MAX_VALUE, length));
                 seek.setProgress((int)Math.min(Integer.MAX_VALUE, now));
                 if(waveform!=null&&waveformEnabled&&length>0)waveform.setTimeline(now,length);
-                time.setText(clock(now) + "  /  " + clock(length));
+                updateTimeLabels(now, length);
                 play.setText(player.isPlaying() ? "Ⅱ" : "▶");
                 if (player.isPlaying() && now - lastPositionSave > 5000) {
                     savePosition();
@@ -352,8 +352,16 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void makeBottom() {
         bottom=new LinearLayout(this); bottom.setOrientation(LinearLayout.VERTICAL); bottom.setPadding(dp(10),0,dp(10),dp(6)); bottom.setBackgroundColor(Color.TRANSPARENT);
+        LinearLayout timeRow=new LinearLayout(this);timeRow.setGravity(Gravity.CENTER_VERTICAL);
+        currentTime=timeLabel("00:00",Gravity.START|Gravity.CENTER_VERTICAL);
+        totalTime=timeLabel("00:00",Gravity.CENTER);
+        remainingTime=timeLabel("-00:00",Gravity.END|Gravity.CENTER_VERTICAL);
+        timeRow.addView(currentTime,new LinearLayout.LayoutParams(0,dp(24),1));
+        timeRow.addView(totalTime,new LinearLayout.LayoutParams(0,dp(24),1));
+        timeRow.addView(remainingTime,new LinearLayout.LayoutParams(0,dp(24),1));
+        bottom.addView(timeRow,new LinearLayout.LayoutParams(-1,dp(24)));
         seek=new SeekBar(this); seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onStartTrackingTouch(SeekBar b){dragging=true;} public void onProgressChanged(SeekBar b,int n,boolean from){if(from)time.setText(clock(n)+"  /  "+clock(player.getLength()));}
+            public void onStartTrackingTouch(SeekBar b){dragging=true;} public void onProgressChanged(SeekBar b,int n,boolean from){if(from)updateTimeLabels(n,Math.max(0,player.getLength()));}
             public void onStopTrackingTouch(SeekBar b){player.setTime(b.getProgress());dragging=false;}
         }); bottom.addView(seek,new LinearLayout.LayoutParams(-1,dp(30)));
         LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER);
@@ -362,8 +370,15 @@ public class PlayerActivity extends AppCompatActivity {
         addControl(row,"10 ↷",18,v->jump(TEN_SECONDS),48);
         addControl(row,"▶|",21,v->playAt(playlistIndex+1),48);
         bottom.addView(row,new LinearLayout.LayoutParams(-1,dp(55)));
-        time=label("00:00  /  00:00",12); time.setShadowLayer(dp(3),0,dp(1),Color.BLACK);time.setGravity(Gravity.START|Gravity.CENTER_VERTICAL); bottom.addView(time,new LinearLayout.LayoutParams(-1,dp(24)));
         root.addView(bottom,new FrameLayout.LayoutParams(-1,dp(115),Gravity.BOTTOM));
+    }
+
+    private TextView timeLabel(String text,int gravity){TextView view=label(text,12);view.setShadowLayer(dp(3),0,dp(1),Color.BLACK);view.setGravity(gravity);return view;}
+    private void updateTimeLabels(long position,long duration){
+        long safeDuration=Math.max(0,duration),safePosition=Math.max(0,Math.min(position,safeDuration));
+        currentTime.setText(clock(safePosition));
+        totalTime.setText(clock(safeDuration));
+        remainingTime.setText("-"+clock(Math.max(0,safeDuration-safePosition)));
     }
 
     private void loadWaveform(){
