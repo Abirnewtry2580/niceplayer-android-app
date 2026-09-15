@@ -147,6 +147,7 @@
         .video-thumb { position:relative; width:112px; height:68px; flex:none; display:grid; place-items:center; overflow:hidden; border-radius:10px; color:#67e8f9; background:linear-gradient(145deg,#172554,#312e81); }
         .video-thumb img { width:100%; height:100%; object-fit:cover; }
         .thumb-duration { position:absolute; right:4px; bottom:4px; padding:2px 5px; border-radius:4px; background:rgba(0,0,0,.82); color:#fff; font-size:9px; font-weight:700; }
+        .thumb-new { position:absolute; z-index:2; right:4px; top:4px; padding:3px 7px; border-radius:999px; background:linear-gradient(135deg,#22d3ee,#0284c7); color:#fff; box-shadow:0 2px 9px rgba(34,211,238,.38); font-size:8px; font-weight:900; letter-spacing:.7px; }
         .video-info { flex:1; min-width:0; }
         .video-name { font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .video-meta { color:#94a3b8; font-size:10px; margin-top:5px; }
@@ -164,7 +165,7 @@
         .video-list.view-grid { display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
         .video-list.view-grid .video-row { display:block; padding:8px; }
         .video-list.view-grid .video-thumb { width:100%; height:auto; aspect-ratio:16/9; margin-bottom:8px; }
-        .video-list.view-grid .video-row .item-menu { position:absolute; right:10px; top:10px; }
+        .video-list.view-grid .video-row .item-menu { position:static; width:100%; height:32px; margin-top:4px; }
         .video-list.view-grid .video-info { padding:0 3px 4px; }
         .manual-open { display:block; margin-top:20px; padding:13px; border-radius:15px; text-align:center; color:#e0f2fe; border:1px solid rgba(34,211,238,.25); background:rgba(8,145,178,.12); font-size:12px; font-weight:700; }
         .library-empty { padding:55px 12px; text-align:center; color:#94a3b8; font-size:12px; line-height:1.6; }
@@ -411,6 +412,16 @@
         let deviceFolders = [], visibleDeviceVideos = [], currentFolder = null, showHiddenOnly = false;
         let libraryView = localStorage.getItem('library_view') || 'detailed';
 
+        function storedList(key){try{const value=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(value)?value:[];}catch(error){return [];}}
+        function hiddenWords(){return storedList('hidden_words').map(word=>String(word).trim().toLowerCase()).filter(Boolean);}
+        function itemHiddenId(kind,item){return (kind==='folder'?'folder:':'video:')+(kind==='folder'?item.bucketId:item.uri);}
+        function keywordMatches(item){const name=String(item&&item.name||'').toLowerCase();return hiddenWords().some(word=>name.includes(word));}
+        function isKeywordHidden(kind,item){return keywordMatches(item)&&!storedList('hidden_word_exceptions').includes(itemHiddenId(kind,item));}
+        function isManuallyHidden(kind,item){const key=kind==='folder'?'hidden_folders':'hidden_videos',id=kind==='folder'?item.bucketId:item.uri;return storedList(key).includes(id);}
+        function isHidden(kind,item){return isManuallyHidden(kind,item)||isKeywordHidden(kind,item);}
+        function playedVideoUris(){return storedList('played_video_uris');}
+        function markVideoPlayed(uri){const played=playedVideoUris();if(!played.includes(uri)){played.push(uri);localStorage.setItem('played_video_uris',JSON.stringify(played));}}
+
         function videoLibraryPlugin() {
             return window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.VideoLibrary;
         }
@@ -457,7 +468,7 @@
                 const result = await plugin.getFolders();
                 deviceFolders = result.folders || [];
                 renderFolderCards(deviceFolders);
-                loadPlaybackHistory();
+                await loadPlaybackHistory();
             } catch (error) {
                 libraryEmpty.innerText = 'Allow video access in Android Settings, then reopen NicePlayer.';
                 document.getElementById('sectionNote').innerText = 'Permission required';
@@ -475,8 +486,7 @@
             libraryEmpty.style.display = folders.length ? 'none' : 'block';
             libraryEmpty.innerText = 'No videos found on this device.';
             const favorites = JSON.parse(localStorage.getItem('favorite_folders') || '[]');
-            const hidden = JSON.parse(localStorage.getItem('hidden_folders') || '[]');
-            folders = folders.filter(folder => showHiddenOnly ? hidden.includes(folder.bucketId) : !hidden.includes(folder.bucketId)).sort((a,b)=>(favorites.includes(b.bucketId)?1:0)-(favorites.includes(a.bucketId)?1:0));
+            folders = folders.filter(folder => showHiddenOnly ? isHidden('folder',folder) : !isHidden('folder',folder)).sort((a,b)=>(favorites.includes(b.bucketId)?1:0)-(favorites.includes(a.bucketId)?1:0));
             folders.forEach(folder => {
                 const card = document.createElement('button'); card.className = 'folder-card';
                 const icon = document.createElement('div'); icon.className = 'folder-icon'; icon.textContent = '▰';
@@ -511,8 +521,7 @@
 
         function renderVideoRows(videos) {
             deviceVideoList.innerHTML = '';
-            const hiddenVideos=JSON.parse(localStorage.getItem('hidden_videos')||'[]');
-            videos=videos.filter(video=>showHiddenOnly?hiddenVideos.includes(video.uri):!hiddenVideos.includes(video.uri));
+            videos=videos.filter(video=>showHiddenOnly?isHidden('video',video):!isHidden('video',video));
             document.getElementById('sectionNote').innerText = videos.length + ' items';
             const duplicateCount={};videos.forEach(v=>{const key=v.name+'|'+v.size;duplicateCount[key]=(duplicateCount[key]||0)+1;});
             videos.forEach(item => {
@@ -520,12 +529,15 @@
                 const thumb = document.createElement('div'); thumb.className = 'video-thumb';
                 thumb.textContent = '▶';
                 if (item.duration) { const badge = document.createElement('span'); badge.className = 'thumb-duration'; badge.textContent = formatTime(item.duration / 1000); thumb.appendChild(badge); }
+                if (!playedVideoUris().includes(item.uri)) { const badge = document.createElement('span'); badge.className = 'thumb-new'; badge.textContent = 'NEW'; thumb.appendChild(badge); }
                 const info = document.createElement('div'); info.className = 'video-info';
                 const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
                 const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size) + (item.duration ? ' · ' + formatTime(item.duration / 1000) : '')+(duplicateCount[item.name+'|'+item.size]>1?' · Possible duplicate':'');
                 const menu=document.createElement('button');menu.className='item-menu';menu.textContent='⋮';menu.addEventListener('click',event=>{event.stopPropagation();showMediaActions('video',item);});
                 info.append(name, meta); row.append(thumb, info,menu);
                 row.addEventListener('click', async () => {
+                    markVideoPlayed(item.uri);
+                    const newBadge=thumb.querySelector('.thumb-new');if(newBadge)newBadge.remove();
                     const plugin = videoLibraryPlugin();
                     if (plugin && plugin.playVideo) {
                         await plugin.playVideo({
@@ -554,7 +566,7 @@
 
         function showMediaActions(kind,item){
             const shade=document.createElement('div');shade.className='action-shade';
-            const hiddenKey=kind==='folder'?'hidden_folders':'hidden_videos',hiddenId=kind==='folder'?item.bucketId:item.uri,hidden=JSON.parse(localStorage.getItem(hiddenKey)||'[]').includes(hiddenId);
+            const hidden=isHidden(kind,item);
             const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><button data-action="rename">Rename</button><button data-action="hide">'+(hidden?'Unhide':'Hide')+'</button><button class="danger" data-action="delete">Delete</button><button data-action="cancel">Cancel</button>';
             sheet.querySelector('.action-title').textContent=item.name;shade.appendChild(sheet);document.body.appendChild(shade);
             shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')shade.remove();});
@@ -562,13 +574,28 @@
             sheet.querySelector('[data-action="hide"]').onclick=()=>{shade.remove();toggleMediaHidden(kind,item);};
             sheet.querySelector('[data-action="delete"]').onclick=()=>{shade.remove();deleteMedia(kind,item);};
         }
-        function toggleMediaHidden(kind,item){const key=kind==='folder'?'hidden_folders':'hidden_videos',id=kind==='folder'?item.bucketId:item.uri;let values=JSON.parse(localStorage.getItem(key)||'[]');values=values.includes(id)?values.filter(value=>value!==id):[...values,id];localStorage.setItem(key,JSON.stringify(values));if(kind==='folder')renderFolderCards(deviceFolders);else renderVideoRows(visibleDeviceVideos);}
+        function toggleMediaHidden(kind,item){
+            const key=kind==='folder'?'hidden_folders':'hidden_videos',id=kind==='folder'?item.bucketId:item.uri,itemId=itemHiddenId(kind,item);
+            let manual=storedList(key),exceptions=storedList('hidden_word_exceptions');
+            if(isHidden(kind,item)){manual=manual.filter(value=>value!==id);if(keywordMatches(item)&&!exceptions.includes(itemId))exceptions.push(itemId);}
+            else{if(!manual.includes(id))manual.push(id);exceptions=exceptions.filter(value=>value!==itemId);}
+            localStorage.setItem(key,JSON.stringify(manual));localStorage.setItem('hidden_word_exceptions',JSON.stringify(exceptions));
+            if(kind==='folder')renderFolderCards(deviceFolders);else renderVideoRows(visibleDeviceVideos);
+        }
         function openViewMenu(){
             const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';
             const historyHidden=localStorage.getItem('history_hidden')==='1';
-            sheet.innerHTML='<div class="action-title">View</div><button data-view="detailed">▤  Detailed</button><button data-view="compact">☷  Compact</button><button data-view="grid">▦  Grid</button><button data-view="hidden">◧  Hidden items</button><button data-action="history">◷  '+(historyHidden?'Show watch history':'Hide watch history')+'</button><button data-action="cancel">Cancel</button>';shade.appendChild(sheet);document.body.appendChild(shade);
+            sheet.innerHTML='<div class="action-title">View</div><button data-view="detailed">▤  Detailed</button><button data-view="compact">☷  Compact</button><button data-view="grid">▦  Grid</button><button data-view="hidden">◧  Hidden items</button><button data-action="words">Aa  Hidden words</button><button data-action="history">◷  '+(historyHidden?'Show watch history':'Hide watch history')+'</button><button data-action="cancel">Cancel</button>';shade.appendChild(sheet);document.body.appendChild(shade);
             sheet.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{shade.remove();setLibraryView(button.dataset.view);});shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')shade.remove();});
             sheet.querySelector('[data-action="history"]').onclick=()=>{localStorage.setItem('history_hidden',historyHidden?'0':'1');shade.remove();loadPlaybackHistory();};
+            sheet.querySelector('[data-action="words"]').onclick=()=>{shade.remove();editHiddenWords();};
+        }
+        function editHiddenWords(){
+            const current=hiddenWords().join(', '),answer=prompt('Enter words separated by commas. Files or folders containing these words will be hidden only inside NicePlayer.',current);
+            if(answer===null)return;
+            const words=[...new Set(answer.split(',').map(word=>word.trim().toLowerCase()).filter(Boolean))];
+            localStorage.setItem('hidden_words',JSON.stringify(words));
+            if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);
         }
         function setLibraryView(mode){if(mode==='hidden'){showHiddenOnly=true;}else{showHiddenOnly=false;libraryView=mode;localStorage.setItem('library_view',mode);}if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);}
         function applyLibraryView(){folderGrid.className='folder-grid view-'+libraryView;deviceVideoList.className='video-list view-'+libraryView;document.getElementById('viewModeButton').textContent=showHiddenOnly?'View: Hidden':'View: '+libraryView.charAt(0).toUpperCase()+libraryView.slice(1);}
@@ -599,7 +626,7 @@
         }
         function toggleFolderFavorite(id){let values=JSON.parse(localStorage.getItem('favorite_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('favorite_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
         function toggleFolderHidden(id){let values=JSON.parse(localStorage.getItem('hidden_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('hidden_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
-        async function loadPlaybackHistory(){const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}strip.style.display='flex';if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),items=result.items||[];strip.innerHTML='';heading.style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>plugin.playVideo({uri:item.uri,title:item.name,index:0,uris:[item.uri],titles:[item.name]});strip.appendChild(card);});}catch(error){}}
+        async function loadPlaybackHistory(){const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),items=result.items||[];items.forEach(item=>markVideoPlayed(item.uri));if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>{markVideoPlayed(item.uri);plugin.playVideo({uri:item.uri,title:item.name,index:0,uris:[item.uri],titles:[item.name]});};strip.appendChild(card);});}catch(error){}}
 
         function setVideoSource(url) {
             if (activeVideoUrl) URL.revokeObjectURL(activeVideoUrl);
