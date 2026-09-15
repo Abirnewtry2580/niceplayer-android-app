@@ -6,6 +6,7 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.app.Activity;
 import android.app.PendingIntent;
+import android.app.RecoverableSecurityException;
 import android.graphics.Bitmap;
 import android.util.Size;
 import android.database.Cursor;
@@ -50,12 +51,15 @@ import java.util.concurrent.TimeUnit;
 public class VideoLibraryPlugin extends Plugin {
     private final ThreadPoolExecutor thumbnailWorker = new ThreadPoolExecutor(
             1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
+    private final ThreadPoolExecutor scanWorker = new ThreadPoolExecutor(
+            1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
     private ActivityResultLauncher<IntentSenderRequest> mutationLauncher;
     private PluginCall pendingMutationCall;
     private String pendingMutationType;
     private String pendingMutationName;
     private String pendingRelativePath;
     private List<Uri> pendingMutationUris;
+    private int pendingMutationIndex;
 
     @Override
     public void load() {
@@ -67,6 +71,7 @@ public class VideoLibraryPlugin extends Plugin {
                         clearPendingMutation(); call.reject("Operation cancelled"); return;
                     }
                     try {
+                        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) { continueAndroid10Mutation(); return; }
                         if (!"deleteVideo".equals(pendingMutationType) && !"deleteFolder".equals(pendingMutationType)) performMutation();
                         JSObject response = new JSObject(); response.put("success", true); call.resolve(response);
                     } catch (Exception error) { call.reject("Could not update media", error); }
@@ -113,13 +118,15 @@ public class VideoLibraryPlugin extends Plugin {
 
     private void requestMutation(PluginCall call, String type, List<Uri> uris, String name, String relativePath) {
         if (pendingMutationCall != null) { call.reject("Another file operation is in progress"); return; }
-        pendingMutationCall=call;pendingMutationType=type;pendingMutationUris=uris;pendingMutationName=name;pendingRelativePath=relativePath;
+        pendingMutationCall=call;pendingMutationType=type;pendingMutationUris=uris;pendingMutationName=name;pendingRelativePath=relativePath;pendingMutationIndex=0;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 PendingIntent consent = (type.startsWith("delete"))
                         ? MediaStore.createDeleteRequest(getContext().getContentResolver(), uris)
                         : MediaStore.createWriteRequest(getContext().getContentResolver(), uris);
                 mutationLauncher.launch(new IntentSenderRequest.Builder(consent.getIntentSender()).build());
+            } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q) {
+                continueAndroid10Mutation();
             } else {
                 performMutation(); JSObject response=new JSObject();response.put("success",true);call.resolve(response);clearPendingMutation();
             }
@@ -127,14 +134,28 @@ public class VideoLibraryPlugin extends Plugin {
     }
 
     private void performMutation() {
+        for(Uri uri:pendingMutationUris) performMutationForUri(uri);
+    }
+
+    private void performMutationForUri(Uri uri) {
         ContentResolver resolver=getContext().getContentResolver();
-        if (pendingMutationType.startsWith("delete")) { for(Uri uri:pendingMutationUris) resolver.delete(uri,null,null); return; }
-        for(Uri uri:pendingMutationUris) {
-            ContentValues values=new ContentValues();
-            if ("renameVideo".equals(pendingMutationType)) values.put(MediaStore.Video.Media.DISPLAY_NAME,pendingMutationName.trim());
-            else values.put(MediaStore.Video.Media.RELATIVE_PATH,pendingRelativePath);
-            resolver.update(uri,values,null,null);
-        }
+        if (pendingMutationType.startsWith("delete")) { resolver.delete(uri,null,null); return; }
+        ContentValues values=new ContentValues();
+        if ("renameVideo".equals(pendingMutationType)) values.put(MediaStore.Video.Media.DISPLAY_NAME,pendingMutationName.trim());
+        else values.put(MediaStore.Video.Media.RELATIVE_PATH,pendingRelativePath);
+        resolver.update(uri,values,null,null);
+    }
+
+    private void continueAndroid10Mutation() {
+        PluginCall call=pendingMutationCall;if(call==null)return;
+        try {
+            while(pendingMutationIndex<pendingMutationUris.size()){
+                performMutationForUri(pendingMutationUris.get(pendingMutationIndex));pendingMutationIndex++;
+            }
+            JSObject response=new JSObject();response.put("success",true);call.resolve(response);clearPendingMutation();
+        } catch (RecoverableSecurityException permission) {
+            mutationLauncher.launch(new IntentSenderRequest.Builder(permission.getUserAction().getActionIntent().getIntentSender()).build());
+        } catch (Exception error) { clearPendingMutation();call.reject("Could not update media",error); }
     }
 
     private FolderMedia folderMedia(String bucketId) {
@@ -145,7 +166,7 @@ public class VideoLibraryPlugin extends Plugin {
         return result;
     }
 
-    private void clearPendingMutation(){pendingMutationCall=null;pendingMutationType=null;pendingMutationUris=null;pendingMutationName=null;pendingRelativePath=null;}
+    private void clearPendingMutation(){pendingMutationCall=null;pendingMutationType=null;pendingMutationUris=null;pendingMutationName=null;pendingRelativePath=null;pendingMutationIndex=0;}
 
     private static class FolderMedia { final List<Uri> uris=new ArrayList<>(); String relativePath; }
 
@@ -260,12 +281,12 @@ public class VideoLibraryPlugin extends Plugin {
             requestPermissionForAlias(Build.VERSION.SDK_INT >= 33 ? "video13" : "storage", call, "permissionResult");
             return;
         }
-        queryFolders(call);
+        scanWorker.execute(() -> queryFolders(call));
     }
 
     @PermissionCallback
     private void permissionResult(PluginCall call) {
-        if (hasVideoPermission()) queryFolders(call);
+        if (hasVideoPermission()) scanWorker.execute(() -> queryFolders(call));
         else call.reject("Video permission denied");
     }
 
@@ -317,28 +338,41 @@ public class VideoLibraryPlugin extends Plugin {
         if (!hasVideoPermission()) { call.reject("Video permission denied"); return; }
         String bucketId = call.getString("bucketId");
         if (bucketId == null) { call.reject("bucketId is required"); return; }
+        scanWorker.execute(() -> queryVideos(call, bucketId));
+    }
 
+    @PluginMethod
+    public void getAllVideos(PluginCall call) {
+        if (!hasVideoPermission()) { call.reject("Video permission denied"); return; }
+        scanWorker.execute(() -> queryVideos(call, null));
+    }
+
+    private void queryVideos(PluginCall call, String bucketId) {
         String[] projection = Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
-                ? new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.IS_PENDING}
-                : new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION};
-        String selection = MediaStore.Video.Media.BUCKET_ID + "=?";
+                ? new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.IS_PENDING,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME}
+                : new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
+        String selection = bucketId == null ? null : MediaStore.Video.Media.BUCKET_ID + "=?";
+        String[] selectionArgs = bucketId == null ? null : new String[]{bucketId};
         JSArray videos = new JSArray();
 
         try (Cursor cursor = getContext().getContentResolver().query(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI, projection, selection,
-                new String[]{bucketId}, MediaStore.Video.Media.DATE_ADDED + " DESC")) {
+                selectionArgs, MediaStore.Video.Media.DATE_ADDED + " DESC")) {
             if (cursor != null) {
                 int idColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
                 int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
                 int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
                 int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
                 int pendingColumn=cursor.getColumnIndex(MediaStore.Video.Media.IS_PENDING);
+                int bucketColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID),bucketNameColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
                 while (cursor.moveToNext()) {
                     long id = cursor.getLong(idColumn);
                     JSObject item = new JSObject();
                     String displayName=cursor.getString(nameColumn);item.put("name",displayName);
                     item.put("size", cursor.getLong(sizeColumn));
                     item.put("duration", cursor.getLong(durationColumn));
+                    if(bucketColumn>=0)item.put("bucketId",cursor.getString(bucketColumn));
+                    if(bucketNameColumn>=0)item.put("bucketName",cursor.getString(bucketNameColumn));
                     item.put("isDownloading",(pendingColumn>=0&&cursor.getInt(pendingColumn)!=0)||looksIncomplete(displayName));
                     Uri videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
                     item.put("uri", videoUri.toString());
@@ -346,7 +380,7 @@ public class VideoLibraryPlugin extends Plugin {
                 }
             }
             JSObject result = new JSObject(); result.put("videos", videos); call.resolve(result);
-        } catch (Exception error) { call.reject("Could not read folder", error); }
+        } catch (Exception error) { call.reject("Could not read videos", error); }
     }
 
     private boolean looksIncomplete(String name){if(name==null)return false;String value=name.toLowerCase(java.util.Locale.US);return value.endsWith(".part")||value.endsWith(".download")||value.endsWith(".crdownload")||value.endsWith(".tmp")||value.endsWith(".partial");}

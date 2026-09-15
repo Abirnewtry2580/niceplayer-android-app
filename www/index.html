@@ -173,6 +173,8 @@
         .video-list.view-grid .video-info { padding:0 3px 4px; }
         .manual-open { display:block; margin-top:20px; padding:13px; border-radius:15px; text-align:center; color:#e0f2fe; border:1px solid rgba(34,211,238,.25); background:rgba(8,145,178,.12); font-size:12px; font-weight:700; }
         .library-empty { padding:55px 12px; text-align:center; color:#94a3b8; font-size:12px; line-height:1.6; }
+        .app-toast { position:fixed; z-index:2000; left:50%; bottom:34px; max-width:calc(100% - 36px); padding:12px 16px; transform:translate(-50%,18px); border:1px solid rgba(255,255,255,.12); border-radius:13px; background:#111827; color:#f8fafc; box-shadow:0 14px 40px rgba(0,0,0,.45); font-size:13px; line-height:1.35; opacity:0; transition:.2s; pointer-events:none; }
+        .app-toast.show { opacity:1; transform:translate(-50%,0); }
         @media (min-width:700px) { .folder-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
     </style>
 </head>
@@ -425,6 +427,23 @@
         function isHidden(kind,item){return isManuallyHidden(kind,item)||isKeywordHidden(kind,item);}
         function playedVideoUris(){return storedList('played_video_uris');}
         function markVideoPlayed(uri){const played=playedVideoUris();if(!played.includes(uri)){played.push(uri);localStorage.setItem('played_video_uris',JSON.stringify(played));}}
+        function videoIsHidden(item){return isHidden('video',item)||(item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||''}));}
+
+        let noticeTimer;
+        function showNotice(message){
+            let toast=document.querySelector('.app-toast');if(!toast){toast=document.createElement('div');toast.className='app-toast';document.body.appendChild(toast);}
+            toast.textContent=String(message);toast.classList.add('show');clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>toast.classList.remove('show'),2600);
+        }
+        function askText(title,message,value=''){
+            return new Promise(resolve=>{const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';
+                sheet.innerHTML='<div class="action-title"></div><div class="action-help"></div><textarea class="action-input"></textarea><button class="primary" data-action="save">Save</button><button data-action="cancel">Cancel</button>';
+                sheet.querySelector('.action-title').textContent=title;sheet.querySelector('.action-help').textContent=message;const input=sheet.querySelector('.action-input');input.value=value;input.style.minHeight='58px';shade.appendChild(sheet);document.body.appendChild(shade);
+                let done=false;const finish=result=>{if(done)return;done=true;shade.remove();resolve(result);};shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')finish(null);});sheet.querySelector('[data-action="save"]').onclick=()=>finish(input.value);setTimeout(()=>{input.focus();input.select();},50);
+            });
+        }
+        function askConfirm(title,message,danger=false){
+            return new Promise(resolve=>{const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><div class="action-help"></div><button data-action="yes">Continue</button><button data-action="cancel">Cancel</button>';sheet.querySelector('.action-title').textContent=title;sheet.querySelector('.action-help').textContent=message;const yes=sheet.querySelector('[data-action="yes"]');if(danger)yes.className='danger';shade.appendChild(sheet);document.body.appendChild(shade);let done=false;const finish=result=>{if(done)return;done=true;shade.remove();resolve(result);};shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')finish(false);});yes.onclick=()=>finish(true);});
+        }
 
         function videoLibraryPlugin() {
             return window.Capacitor && Capacitor.Plugins && Capacitor.Plugins.VideoLibrary;
@@ -435,7 +454,7 @@
             const plugin = videoLibraryPlugin();
             if (plugin && plugin.saveImage) {
                 const result = await plugin.saveImage({ dataUrl, fileName });
-                alert('Saved to Gallery: Pictures/NicePlayer/' + result.fileName);
+                showNotice('Saved to Gallery: Pictures/NicePlayer/' + result.fileName);
                 return;
             }
             const a = document.createElement('a');
@@ -487,10 +506,11 @@
             document.getElementById('sectionName').innerText = 'Video folders';
             document.getElementById('sectionNote').innerText = folders.length + ' found';
             document.getElementById('libraryBack').style.display = 'none';
-            libraryEmpty.style.display = folders.length ? 'none' : 'block';
-            libraryEmpty.innerText = 'No videos found on this device.';
             const favorites = JSON.parse(localStorage.getItem('favorite_folders') || '[]');
             folders = folders.filter(folder => showHiddenOnly ? isHidden('folder',folder) : !isHidden('folder',folder)).sort((a,b)=>(favorites.includes(b.bucketId)?1:0)-(favorites.includes(a.bucketId)?1:0));
+            libraryEmpty.style.display = folders.length ? 'none' : 'block';
+            libraryEmpty.innerText = showHiddenOnly?'No hidden folders or videos.':'No visible videos found on this device.';
+            document.getElementById('sectionNote').innerText = folders.length + ' found';
             folders.forEach(folder => {
                 const card = document.createElement('button'); card.className = 'folder-card';
                 const icon = document.createElement('div'); icon.className = 'folder-icon'; icon.textContent = '▰';
@@ -505,7 +525,7 @@
             applyLibraryView();
         }
 
-        function showVideoFolders() { visibleDeviceVideos = []; currentFolder=null;currentFolderIsHidden=false;renderFolderCards(deviceFolders); }
+        function showVideoFolders() { showHiddenOnly=false;visibleDeviceVideos = []; currentFolder=null;currentFolderIsHidden=false;renderFolderCards(deviceFolders); }
 
         async function showFolderVideos(folder) {
             currentFolder = folder;
@@ -519,15 +539,18 @@
             deviceVideoList.innerHTML = '<div class="library-empty">Loading videos…</div>';
             try {
                 const result = await plugin.getVideos({ bucketId: folder.bucketId });
-                visibleDeviceVideos = (result.videos || []).map(item => ({ ...item, url: Capacitor.convertFileSrc(item.uri) }));
+                visibleDeviceVideos = (result.videos || []).map(item => ({ ...item, bucketId:folder.bucketId,bucketName:folder.name,url: Capacitor.convertFileSrc(item.uri) }));
                 renderVideoRows(visibleDeviceVideos);
             } catch (error) { deviceVideoList.innerHTML = '<div class="library-empty">Could not read this folder.</div>'; }
         }
 
         function renderVideoRows(videos) {
             deviceVideoList.innerHTML = '';
-            videos=videos.filter(video=>currentFolderIsHidden||(showHiddenOnly?isHidden('video',video):!isHidden('video',video)));
+            const hiddenUris=new Set(videos.filter(videoIsHidden).map(video=>video.uri));
+            if(hiddenUris.size)localStorage.setItem('played_video_uris',JSON.stringify(playedVideoUris().filter(uri=>!hiddenUris.has(uri))));
+            videos=videos.filter(video=>showHiddenOnly?videoIsHidden(video):!videoIsHidden(video));
             document.getElementById('sectionNote').innerText = videos.length + ' items';
+            libraryEmpty.style.display=videos.length?'none':'block';libraryEmpty.innerText=showHiddenOnly?'No hidden videos.':'No visible videos in this folder.';
             const duplicateCount={};videos.forEach(v=>{const key=v.name+'|'+v.size;duplicateCount[key]=(duplicateCount[key]||0)+1;});
             videos.forEach(item => {
                 const row = document.createElement('div'); row.className = 'video-row';
@@ -541,14 +564,12 @@
                 const menu=document.createElement('button');menu.className='item-menu';menu.textContent='⋮';menu.addEventListener('click',event=>{event.stopPropagation();showMediaActions('video',item);});
                 info.append(name, meta); row.append(thumb, info,menu);
                 row.addEventListener('click', async () => {
-                    markVideoPlayed(item.uri);
-                    const newBadge=thumb.querySelector('.thumb-new');if(newBadge)newBadge.remove();
                     const plugin = videoLibraryPlugin();
                     if (plugin && plugin.playVideo) {
                         await plugin.playVideo({
                             uri: item.uri,
                             title: item.name,
-                            privateMode: currentFolderIsHidden || isHidden('video',item),
+                            privateMode: videoIsHidden(item),
                             index: videos.indexOf(item),
                             uris: videos.map(video => video.uri),
                             titles: videos.map(video => video.name)
@@ -572,12 +593,13 @@
 
         function showMediaActions(kind,item){
             const shade=document.createElement('div');shade.className='action-shade';
-            const hidden=isHidden(kind,item);
-            const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><button data-action="rename">Rename</button><button data-action="hide">'+(hidden?'Unhide':'Hide')+'</button><button class="danger" data-action="delete">Delete</button><button data-action="cancel">Cancel</button>';
+            const parent=kind==='video'&&item.bucketId?deviceFolders.find(folder=>folder.bucketId===item.bucketId):null,parentHidden=!!(parent&&isHidden('folder',parent));
+            const hidden=kind==='video'?videoIsHidden(item):isHidden(kind,item);
+            const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><button data-action="rename">Rename</button><button data-action="hide">'+(parentHidden?'Unhide folder':hidden?'Unhide':'Hide')+'</button><button class="danger" data-action="delete">Delete</button><button data-action="cancel">Cancel</button>';
             sheet.querySelector('.action-title').textContent=item.name;shade.appendChild(sheet);document.body.appendChild(shade);
             shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')shade.remove();});
             sheet.querySelector('[data-action="rename"]').onclick=()=>{shade.remove();renameMedia(kind,item);};
-            sheet.querySelector('[data-action="hide"]').onclick=()=>{shade.remove();toggleMediaHidden(kind,item);};
+            sheet.querySelector('[data-action="hide"]').onclick=()=>{shade.remove();toggleMediaHidden(parentHidden?'folder':kind,parentHidden?parent:item);};
             sheet.querySelector('[data-action="delete"]').onclick=()=>{shade.remove();deleteMedia(kind,item);};
         }
         function toggleMediaHidden(kind,item){
@@ -611,19 +633,20 @@
             };
             setTimeout(()=>input.focus(),50);
         }
-        function setLibraryView(mode){if(mode==='hidden'){showHiddenOnly=true;}else{showHiddenOnly=false;libraryView=mode;localStorage.setItem('library_view',mode);}if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);}
+        async function showHiddenItems(){const plugin=videoLibraryPlugin();showHiddenOnly=true;currentFolder=null;currentFolderIsHidden=false;folderGrid.style.display='none';deviceVideoList.style.display='flex';deviceVideoList.innerHTML='<div class="library-empty">Finding hidden videos…</div>';libraryEmpty.style.display='none';document.getElementById('libraryTitle').innerText='Hidden items';document.getElementById('librarySubtitle').innerText='Hidden only inside NicePlayer';document.getElementById('sectionName').innerText='Hidden videos';document.getElementById('libraryBack').style.display='block';try{const result=await plugin.getAllVideos();visibleDeviceVideos=(result.videos||[]).map(item=>({...item,url:Capacitor.convertFileSrc(item.uri)}));renderVideoRows(visibleDeviceVideos);}catch(error){visibleDeviceVideos=[];renderVideoRows([]);showNotice('Could not load hidden videos.');}}
+        function setLibraryView(mode){if(mode==='hidden'){showHiddenItems();return;}showHiddenOnly=false;libraryView=mode;localStorage.setItem('library_view',mode);if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);}
         function applyLibraryView(){folderGrid.className='folder-grid view-'+libraryView;deviceVideoList.className='video-list view-'+libraryView;document.getElementById('viewModeButton').textContent=showHiddenOnly?'View: Hidden':'View: '+libraryView.charAt(0).toUpperCase()+libraryView.slice(1);}
         async function renameMedia(kind,item){
-            const next=prompt('New '+kind+' name',item.name);if(!next||next.trim()===item.name)return;
+            const next=await askText('Rename '+kind,'Enter a new name.',item.name);if(!next||next.trim()===item.name)return;
             const plugin=videoLibraryPlugin();if(!plugin)return;
             try{if(kind==='video')await plugin.renameVideo({uri:item.uri,name:next.trim()});else await plugin.renameFolder({bucketId:item.bucketId,name:next.trim()});await scanDeviceVideos();if(kind==='video'&&currentFolder)await showFolderVideos(currentFolder);}
-            catch(error){alert('Rename failed or permission was denied.');}
+            catch(error){showNotice('Rename failed or permission was denied.');}
         }
         async function deleteMedia(kind,item){
-            const warning=kind==='folder'?'Delete this folder and all '+item.count+' videos? This cannot be undone.':'Delete this video permanently? This cannot be undone.';if(!confirm(warning))return;
+            const warning=kind==='folder'?'Delete this folder and all '+item.count+' videos? This cannot be undone.':'Delete this video permanently? This cannot be undone.';if(!await askConfirm('Delete '+kind,warning,true))return;
             const plugin=videoLibraryPlugin();if(!plugin)return;
             try{if(kind==='video')await plugin.deleteVideo({uri:item.uri});else await plugin.deleteFolder({bucketId:item.bucketId});await scanDeviceVideos();if(kind==='video'&&currentFolder)await showFolderVideos(currentFolder);}
-            catch(error){alert('Delete failed or permission was denied.');}
+            catch(error){showNotice('Delete failed or permission was denied.');}
         }
 
         function filterLibrary(query) {
@@ -640,7 +663,7 @@
         }
         function toggleFolderFavorite(id){let values=JSON.parse(localStorage.getItem('favorite_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('favorite_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
         function toggleFolderHidden(id){let values=JSON.parse(localStorage.getItem('hidden_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('hidden_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
-        async function loadPlaybackHistory(){const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),allItems=result.items||[],hiddenUris=[];const items=allItems.filter(item=>{const videoHidden=isHidden('video',{uri:item.uri,name:item.fileName||item.name,isDownloading:false}),folderHidden=item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||'',hasRunningDownloads:false});if(videoHidden||folderHidden){hiddenUris.push(item.uri);return false;}return true;});if(hiddenUris.length&&plugin.removeHistory)await plugin.removeHistory({uris:hiddenUris});items.forEach(item=>markVideoPlayed(item.uri));if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>{markVideoPlayed(item.uri);plugin.playVideo({uri:item.uri,title:item.name,privateMode:false,index:0,uris:[item.uri],titles:[item.name]});};strip.appendChild(card);});}catch(error){}}
+        async function loadPlaybackHistory(){const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),allItems=result.items||[],hiddenUris=[];const items=allItems.filter(item=>{const videoHidden=isHidden('video',{uri:item.uri,name:item.fileName||item.name,isDownloading:false}),folderHidden=item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||'',hasRunningDownloads:false});if(videoHidden||folderHidden){hiddenUris.push(item.uri);return false;}return true;});if(hiddenUris.length&&plugin.removeHistory)await plugin.removeHistory({uris:hiddenUris});items.forEach(item=>markVideoPlayed(item.uri));if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>{plugin.playVideo({uri:item.uri,title:item.name,privateMode:false,index:0,uris:[item.uri],titles:[item.name]});};strip.appendChild(card);});}catch(error){}}
 
         function setVideoSource(url) {
             if (activeVideoUrl) URL.revokeObjectURL(activeVideoUrl);
@@ -754,7 +777,7 @@
                 hlsPlayer.on(Hls.Events.ERROR, (_, data) => {
                     if (data.fatal) {
                         showLoader(false);
-                        alert('This local M3U8 needs its separate segment files.');
+                        showNotice('This local M3U8 needs its separate segment files.');
                     }
                 });
             } else if (await tryDirectPlayback(file)) {
@@ -793,7 +816,7 @@
                     }
                 } catch (err) {
                     showLoader(false);
-                    alert('This video could not be played. Conversion error: ' + err.message);
+                    showNotice('This video could not be played. Conversion error: ' + err.message);
                 }
             }
             renderPlaylist();
@@ -927,7 +950,7 @@
                     subtitleDelay = 0;
                     renderSubtitleTrack();
                     updateSubtitleDelayText();
-                    alert('Subtitle loaded');
+                    showNotice('Subtitle loaded');
                 };
                 reader.readAsText(file);
             }
@@ -1026,8 +1049,8 @@
 
         function setSleepTimer(mins) {
             clearTimeout(sleepTimeout);
-            if (mins > 0) { sleepTimeout = setTimeout(() => { video.pause(); alert("Sleep Timer Triggered: Video Paused"); }, mins * 60 * 1000); alert(`Timer set for ${mins} mins`); }
-            else alert("Sleep Timer Disabled");
+            if (mins > 0) { sleepTimeout = setTimeout(() => { video.pause(); showNotice("Sleep Timer Triggered: Video Paused"); }, mins * 60 * 1000); showNotice(`Timer set for ${mins} mins`); }
+            else showNotice("Sleep Timer Disabled");
             closePanels();
         }
 
@@ -1038,11 +1061,11 @@
         async function togglePiP() {
             try {
                 if (!document.pictureInPictureEnabled || !video.requestPictureInPicture) {
-                    return alert('Picture-in-Picture is not supported on this device.');
+                    return showNotice('Picture-in-Picture is not supported on this device.');
                 }
                 if (document.pictureInPictureElement) await document.exitPictureInPicture();
                 else await video.requestPictureInPicture();
-            } catch (err) { alert('Could not start Picture-in-Picture.'); }
+            } catch (err) { showNotice('Could not start Picture-in-Picture.'); }
         }
         async function toggleFullscreen() {
             try {
@@ -1050,19 +1073,19 @@
                     if (wrapper.requestFullscreen) await wrapper.requestFullscreen();
                     else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
                 } else if (document.exitFullscreen) await document.exitFullscreen();
-            } catch (err) { alert('Could not enter fullscreen mode.'); }
+            } catch (err) { showNotice('Could not enter fullscreen mode.'); }
         }
 
         async function takeScreenshot(e) {
             if (e) e.stopPropagation();
-            if (!video.videoWidth || video.readyState < 2) return alert("Play a video first.");
+            if (!video.videoWidth || video.readyState < 2) return showNotice("Play a video first.");
             try {
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth; canvas.height = video.videoHeight;
                 canvas.getContext('2d').drawImage(video, 0, 0);
                 await saveCanvas(canvas, `Frame_${Math.floor(video.currentTime)}s_${Date.now()}.png`);
             } catch (error) {
-                alert('Screenshot could not be saved: ' + error.message);
+                showNotice('Screenshot could not be saved: ' + error.message);
             }
         }
 
@@ -1084,7 +1107,7 @@
         }
 
         async function generatePreviewSheet() {
-            if (!video.videoWidth || !video.duration) return alert("Play a video first.");
+            if (!video.videoWidth || !video.duration) return showNotice("Play a video first.");
             const wasPlaying = !video.paused; const origTime = video.currentTime; video.pause();
             showLoader(true, "Creating preview: 0%");
 
@@ -1115,13 +1138,14 @@
                 }
                 await saveCanvas(canvas, `Preview_Sheet_${Date.now()}.png`);
             } catch (error) {
-                alert('Preview could not be created: ' + error.message);
+                showNotice('Preview could not be created: ' + error.message);
             } finally {
                 showLoader(false);
                 video.currentTime = origTime;
                 if (wasPlaying) video.play().catch(() => {});
             }
         }
+        document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadPlaybackHistory();});
         window.addEventListener('DOMContentLoaded', scanDeviceVideos);
     </script>
 </body>
