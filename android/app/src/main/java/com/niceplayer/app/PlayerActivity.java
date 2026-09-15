@@ -57,6 +57,7 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean dragging, controls = true, locked, orientationLocked;
     private boolean privateMode;
     private boolean softwareRetryAttempted;
+    private boolean directUriRetryAttempted;
     private Uri sourceUri;
     private ParcelFileDescriptor sourceDescriptor;
     private ArrayList<String> playlistUris = new ArrayList<>(), playlistTitles = new ArrayList<>();
@@ -160,7 +161,10 @@ public class PlayerActivity extends AppCompatActivity {
         player.setEventListener(e -> runOnUiThread(() -> {
             if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
             else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService(); }
-            else if (e.type == MediaPlayer.Event.EndReached) playAt(playlistIndex + 1);
+            else if (e.type == MediaPlayer.Event.EndReached) {
+                if (player.getLength() <= 0 || player.getTime() < 1000) handlePlaybackError();
+                else playAt(playlistIndex + 1);
+            }
         }));
         if (!startPlayback(true)) {
             Toast.makeText(this, "Could not open this video", Toast.LENGTH_LONG).show();
@@ -180,10 +184,14 @@ public class PlayerActivity extends AppCompatActivity {
      * LibVLC works on some phones, but fails on others even though this app owns permission.
      */
     private boolean startPlayback(boolean hardwareDecoder) {
+        return startPlayback(hardwareDecoder, false);
+    }
+
+    private boolean startPlayback(boolean hardwareDecoder, boolean directUri) {
         closeSourceDescriptor();
         try {
             Media media;
-            if ("content".equalsIgnoreCase(sourceUri.getScheme())) {
+            if ("content".equalsIgnoreCase(sourceUri.getScheme()) && !directUri) {
                 sourceDescriptor = getContentResolver().openFileDescriptor(sourceUri, "r");
                 if (sourceDescriptor == null) throw new FileNotFoundException("Null video descriptor");
                 media = new Media(vlc, sourceDescriptor.getFileDescriptor());
@@ -223,7 +231,13 @@ public class PlayerActivity extends AppCompatActivity {
             player.stop();
             if (startPlayback(false)) return;
         }
-        Toast.makeText(this, "This video is damaged or uses an unsupported codec", Toast.LENGTH_LONG).show();
+        if (!directUriRetryAttempted && "content".equalsIgnoreCase(sourceUri.getScheme())) {
+            directUriRetryAttempted = true;
+            Toast.makeText(this, "Trying alternate storage access…", Toast.LENGTH_SHORT).show();
+            player.stop();
+            if (startPlayback(false, true)) return;
+        }
+        Toast.makeText(this, "This video could not be opened. Android may be blocking access to this hidden folder.", Toast.LENGTH_LONG).show();
     }
 
     private void closeSourceDescriptor() {
@@ -294,6 +308,7 @@ public class PlayerActivity extends AppCompatActivity {
         playlistIndex = index;
         sourceUri = Uri.parse(playlistUris.get(index));
         softwareRetryAttempted = false;
+        directUriRetryAttempted = false;
         title.setText(currentTitle());
         player.stop();
         resetVideoZoom(false);
