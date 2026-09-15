@@ -186,7 +186,7 @@
                 <div class="brand-orb">▶</div>
                 <div><div class="library-title" id="libraryTitle">NicePlayer</div><div class="library-subtitle" id="librarySubtitle">Your intelligent media library</div></div>
             </div>
-            <button class="icon-action" id="libraryBack" style="display:none" onclick="showVideoFolders()">←</button>
+            <button class="icon-action" id="libraryBack" style="display:none" onclick="handleLibraryBack()">←</button>
         </div>
         <div class="search-shell"><span>⌕</span><input id="videoSearch" type="search" placeholder="Search folders or videos" oninput="filterLibrary(this.value)"></div>
         <div class="section-row" id="historyHeading" style="display:none"><div class="section-name">Continue watching</div></div>
@@ -415,7 +415,7 @@
         const folderGrid = document.getElementById('folderGrid');
         const deviceVideoList = document.getElementById('deviceVideoList');
         const libraryEmpty = document.getElementById('libraryEmpty');
-        let deviceFolders = [], visibleDeviceVideos = [], currentFolder = null, currentFolderIsHidden = false, showHiddenOnly = false;
+        let deviceFolders = [], visibleDeviceVideos = [], hiddenFolderGroups = [], currentFolder = null, currentFolderIsHidden = false, showHiddenOnly = false;
         let libraryView = localStorage.getItem('library_view') || 'detailed';
 
         function storedList(key){try{const value=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(value)?value:[];}catch(error){return [];}}
@@ -468,12 +468,15 @@
         function closeLibraryHome() { libraryScreen.classList.add('hidden'); }
         function openLibraryHome() { video.pause(); libraryScreen.classList.remove('hidden'); showVideoFolders(); }
         function handleAndroidBack() {
+            const actionShade=document.querySelector('.action-shade');if(actionShade){actionShade.remove();return;}
             if (document.querySelector('.modal-panel.active')) { closePanels(); return; }
             if (libraryScreen.classList.contains('hidden')) { openLibraryHome(); return; }
-            if (visibleDeviceVideos.length) { showVideoFolders(); return; }
+            if (currentFolder) { handleLibraryBack(); return; }
+            if (showHiddenOnly) { showVideoFolders(); return; }
             const plugin = videoLibraryPlugin(); if (plugin && plugin.exitApp) plugin.exitApp();
         }
         window.handleAndroidBack = handleAndroidBack;
+        function handleLibraryBack(){if(showHiddenOnly&&currentFolder){currentFolder=null;currentFolderIsHidden=false;visibleDeviceVideos=[];renderHiddenFolderCards();return;}showVideoFolders();}
         function humanSize(bytes) {
             let n = Number(bytes || 0), i = 0; const u = ['B','KB','MB','GB'];
             while (n >= 1024 && i < 3) { n /= 1024; i++; }
@@ -526,6 +529,16 @@
         }
 
         function showVideoFolders() { showHiddenOnly=false;visibleDeviceVideos = []; currentFolder=null;currentFolderIsHidden=false;renderFolderCards(deviceFolders); }
+
+        function hiddenVideosForGroup(group){return isHidden('folder',group.folder)?group.videos:group.videos.filter(video=>isHidden('video',video));}
+        function renderHiddenFolderCards(groups=hiddenFolderGroups){
+            showHiddenOnly=true;currentFolder=null;currentFolderIsHidden=false;visibleDeviceVideos=[];folderGrid.innerHTML='';folderGrid.style.display='grid';deviceVideoList.style.display='none';
+            document.getElementById('libraryTitle').innerText='Hidden items';document.getElementById('librarySubtitle').innerText='Organized by folder';document.getElementById('sectionName').innerText='Hidden folders';document.getElementById('libraryBack').style.display='block';
+            groups=groups.map(group=>({...group,hiddenVideos:hiddenVideosForGroup(group)})).filter(group=>group.hiddenVideos.length);
+            document.getElementById('sectionNote').innerText=groups.length+' folders';libraryEmpty.style.display=groups.length?'none':'block';libraryEmpty.innerText='No hidden folders or videos.';
+            groups.forEach(group=>{const folder=group.folder,card=document.createElement('button');card.className='folder-card';const icon=document.createElement('div');icon.className='folder-icon';icon.textContent='▰';const name=document.createElement('div');name.className='folder-name';name.textContent=folder.name;const count=document.createElement('div');count.className='folder-count';count.textContent=group.hiddenVideos.length+' hidden video'+(group.hiddenVideos.length===1?'':'s');const menu=document.createElement('button');menu.className='item-menu';menu.textContent='⋮';menu.addEventListener('click',event=>{event.stopPropagation();showMediaActions('folder',folder);});card.append(icon,name,count,menu);card.addEventListener('click',()=>showHiddenFolderVideos(group));card.addEventListener('contextmenu',event=>{event.preventDefault();showMediaActions('folder',folder);});folderGrid.appendChild(card);});applyLibraryView();
+        }
+        function showHiddenFolderVideos(group){showHiddenOnly=true;currentFolder=group.folder;currentFolderIsHidden=isHidden('folder',group.folder);document.getElementById('libraryTitle').innerText=group.folder.name;document.getElementById('librarySubtitle').innerText=currentFolderIsHidden?'Hidden folder':'Contains hidden videos';document.getElementById('sectionName').innerText='Hidden videos';document.getElementById('libraryBack').style.display='block';folderGrid.style.display='none';deviceVideoList.style.display='flex';visibleDeviceVideos=group.videos;renderVideoRows(visibleDeviceVideos);}
 
         async function showFolderVideos(folder) {
             currentFolder = folder;
@@ -608,7 +621,7 @@
             if(isHidden(kind,item)){manual=manual.filter(value=>value!==id);if(keywordMatches(item)&&!exceptions.includes(itemId))exceptions.push(itemId);}
             else{if(!manual.includes(id))manual.push(id);exceptions=exceptions.filter(value=>value!==itemId);}
             localStorage.setItem(key,JSON.stringify(manual));localStorage.setItem('hidden_word_exceptions',JSON.stringify(exceptions));
-            if(kind==='folder')renderFolderCards(deviceFolders);else renderVideoRows(visibleDeviceVideos);loadPlaybackHistory();
+            if(showHiddenOnly){if(currentFolder)renderVideoRows(visibleDeviceVideos);else renderHiddenFolderCards();}else if(kind==='folder')renderFolderCards(deviceFolders);else renderVideoRows(visibleDeviceVideos);loadPlaybackHistory();
         }
         function openViewMenu(){
             const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';
@@ -629,11 +642,11 @@
             sheet.querySelector('[data-action="save"]').onclick=()=>{
                 const words=[...new Set(input.value.split(',').map(word=>word.trim().toLowerCase()).filter(Boolean))];
                 localStorage.setItem('hidden_words',JSON.stringify(words));close();
-                if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);loadPlaybackHistory();
+                if(showHiddenOnly)showHiddenItems();else if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);loadPlaybackHistory();
             };
             setTimeout(()=>input.focus(),50);
         }
-        async function showHiddenItems(){const plugin=videoLibraryPlugin();showHiddenOnly=true;currentFolder=null;currentFolderIsHidden=false;folderGrid.style.display='none';deviceVideoList.style.display='flex';deviceVideoList.innerHTML='<div class="library-empty">Finding hidden videos…</div>';libraryEmpty.style.display='none';document.getElementById('libraryTitle').innerText='Hidden items';document.getElementById('librarySubtitle').innerText='Hidden only inside NicePlayer';document.getElementById('sectionName').innerText='Hidden videos';document.getElementById('libraryBack').style.display='block';try{const result=await plugin.getAllVideos();visibleDeviceVideos=(result.videos||[]).map(item=>({...item,url:Capacitor.convertFileSrc(item.uri)}));renderVideoRows(visibleDeviceVideos);}catch(error){visibleDeviceVideos=[];renderVideoRows([]);showNotice('Could not load hidden videos.');}}
+        async function showHiddenItems(){const plugin=videoLibraryPlugin();showHiddenOnly=true;currentFolder=null;currentFolderIsHidden=false;folderGrid.style.display='none';deviceVideoList.style.display='flex';deviceVideoList.innerHTML='<div class="library-empty">Finding hidden folders…</div>';libraryEmpty.style.display='none';document.getElementById('libraryTitle').innerText='Hidden items';document.getElementById('librarySubtitle').innerText='Organized by folder';document.getElementById('sectionName').innerText='Hidden folders';document.getElementById('libraryBack').style.display='block';try{const result=await plugin.getAllVideos(),groups=new Map();(result.videos||[]).forEach(raw=>{const item={...raw,url:Capacitor.convertFileSrc(raw.uri)},folder=deviceFolders.find(value=>value.bucketId===item.bucketId)||{bucketId:item.bucketId,name:item.bucketName||'Videos',count:0};if(!groups.has(folder.bucketId))groups.set(folder.bucketId,{folder,videos:[]});groups.get(folder.bucketId).videos.push(item);});hiddenFolderGroups=[...groups.values()];renderHiddenFolderCards();}catch(error){hiddenFolderGroups=[];renderHiddenFolderCards();showNotice('Could not load hidden items.');}}
         function setLibraryView(mode){if(mode==='hidden'){showHiddenItems();return;}showHiddenOnly=false;libraryView=mode;localStorage.setItem('library_view',mode);if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);else renderFolderCards(deviceFolders);}
         function applyLibraryView(){folderGrid.className='folder-grid view-'+libraryView;deviceVideoList.className='video-list view-'+libraryView;document.getElementById('viewModeButton').textContent=showHiddenOnly?'View: Hidden':'View: '+libraryView.charAt(0).toUpperCase()+libraryView.slice(1);}
         async function renameMedia(kind,item){
@@ -652,13 +665,15 @@
         function filterLibrary(query) {
             if(query.trim())localStorage.setItem('last_search',query.trim());
             const q = query.trim().toLowerCase();
-            if (visibleDeviceVideos.length) renderVideoRows(visibleDeviceVideos.filter(v => v.name.toLowerCase().includes(q)));
+            if(showHiddenOnly&&!currentFolder)renderHiddenFolderCards(hiddenFolderGroups.filter(group=>group.folder.name.toLowerCase().includes(q)));
+            else if (visibleDeviceVideos.length) renderVideoRows(visibleDeviceVideos.filter(v => v.name.toLowerCase().includes(q)));
             else renderFolderCards(deviceFolders.filter(f => f.name.toLowerCase().includes(q)));
         }
 
         function applyLibrarySort(){
             const mode=document.getElementById('librarySort').value;
-            if(visibleDeviceVideos.length){const videos=[...visibleDeviceVideos];videos.sort((a,b)=>mode==='name'?a.name.localeCompare(b.name):mode==='size'?b.size-a.size:mode==='duration'?b.duration-a.duration:0);renderVideoRows(videos);}
+            if(showHiddenOnly&&!currentFolder){const groups=[...hiddenFolderGroups];if(mode==='name')groups.sort((a,b)=>a.folder.name.localeCompare(b.folder.name));renderHiddenFolderCards(groups);}
+            else if(visibleDeviceVideos.length){const videos=[...visibleDeviceVideos];videos.sort((a,b)=>mode==='name'?a.name.localeCompare(b.name):mode==='size'?b.size-a.size:mode==='duration'?b.duration-a.duration:0);renderVideoRows(videos);}
             else{const folders=[...deviceFolders];if(mode==='name')folders.sort((a,b)=>a.name.localeCompare(b.name));renderFolderCards(folders);}
         }
         function toggleFolderFavorite(id){let values=JSON.parse(localStorage.getItem('favorite_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('favorite_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
