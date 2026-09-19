@@ -16,6 +16,7 @@ public class WaveformView extends View {
     private static final float SILENCE_THRESHOLD = 0.035f;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private float[] levels = new float[0];
+    private boolean[] speech = new boolean[0];
     private long positionMs;
     private long durationMs;
 
@@ -26,10 +27,13 @@ public class WaveformView extends View {
         setContentDescription("Audio waveform: previous five seconds and next five seconds");
     }
 
-    public void setLevels(float[] values) {
-        levels = values == null ? new float[0] : values;
+    public void setAnalysis(AudioWaveformExtractor.Result result) {
+        levels = result == null || result.levels == null ? new float[0] : result.levels;
+        speech = result == null || result.speech == null ? new boolean[0] : result.speech;
         invalidate();
     }
+
+    public void clearAnalysis() { setAnalysis(null); }
 
     public void setTimeline(long position, long duration) {
         positionMs = Math.max(0, position);
@@ -43,7 +47,7 @@ public class WaveformView extends View {
         if (width <= 0 || height <= 0) return;
 
         if (levels.length == 0 || durationMs <= 0) {
-            paint.setColor(0xCCFFFFFF);
+            paint.setColor(0x995B6472);
             paint.setStrokeWidth(Math.max(2f, getResources().getDisplayMetrics().density * 2f));
             for (float x = 8; x < width; x += 12) canvas.drawCircle(x, centerY, 1.8f, paint);
             drawPlayhead(canvas, width, height);
@@ -61,20 +65,25 @@ public class WaveformView extends View {
             long sampleTime = windowStart + Math.round((column + .5f) * windowDuration / columns);
             float x = (column + .5f) * step;
             float level = levelAt(sampleTime);
-            boolean past = sampleTime <= positionMs;
-
             if (level <= SILENCE_THRESHOLD || sampleTime < 0 || sampleTime > durationMs) {
-                paint.setColor(0xCCFFFFFF);
+                paint.setColor(0x995B6472);
                 canvas.drawCircle(x, centerY, Math.max(1.5f, stroke * .38f), paint);
                 continue;
             }
 
             float half = Math.max(stroke, level * height * .43f);
-            paint.setColor(Color.WHITE);
+            paint.setColor(speechAt(sampleTime) ? 0xFF19E6C1 : 0xB86B7280);
             paint.setStrokeWidth(stroke);
             canvas.drawLine(x, centerY - half, x, centerY + half, paint);
         }
         drawPlayhead(canvas, width, height);
+    }
+
+    private boolean speechAt(long timeMs) {
+        if (timeMs < 0 || timeMs > durationMs || speech.length == 0) return false;
+        int index = Math.max(0, Math.min(speech.length - 1,
+                Math.round(timeMs * (speech.length - 1f) / Math.max(1L, durationMs))));
+        return speech[index];
     }
 
     private float levelAt(long timeMs) {
