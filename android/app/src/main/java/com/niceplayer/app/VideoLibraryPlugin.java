@@ -351,8 +351,8 @@ public class VideoLibraryPlugin extends Plugin {
 
     private void queryVideos(PluginCall call, String bucketId) {
         String[] projection = Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
-                ? new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.IS_PENDING,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.RELATIVE_PATH}
-                : new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
+                ? new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.DATE_ADDED,MediaStore.Video.Media.IS_PENDING,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.RELATIVE_PATH}
+                : new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.SIZE,MediaStore.Video.Media.DURATION,MediaStore.Video.Media.DATE_ADDED,MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
         String selection = bucketId == null ? null : MediaStore.Video.Media.BUCKET_ID + "=?";
         String[] selectionArgs = bucketId == null ? null : new String[]{bucketId};
         JSArray videos = new JSArray();
@@ -365,6 +365,7 @@ public class VideoLibraryPlugin extends Plugin {
                 int nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME);
                 int sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE);
                 int durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION);
+                int dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED);
                 int pendingColumn=cursor.getColumnIndex(MediaStore.Video.Media.IS_PENDING);
                 int bucketColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID),bucketNameColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME),relativePathColumn=cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH);
                 while (cursor.moveToNext()) {
@@ -376,8 +377,10 @@ public class VideoLibraryPlugin extends Plugin {
                     String displayName=cursor.getString(nameColumn);item.put("name",displayName);
                     item.put("size", cursor.getLong(sizeColumn));
                     item.put("duration", cursor.getLong(durationColumn));
+                    item.put("dateAdded",cursor.getLong(dateAddedColumn));
                     if(bucketColumn>=0)item.put("bucketId",cursor.getString(bucketColumn));
                     if(bucketNameColumn>=0)item.put("bucketName",bucketName);
+                    if(relativePathColumn>=0)item.put("relativePath",relativePath);
                     item.put("isDownloading",(pendingColumn>=0&&cursor.getInt(pendingColumn)!=0)||looksIncomplete(displayName));
                     Uri videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
                     item.put("uri", videoUri.toString());

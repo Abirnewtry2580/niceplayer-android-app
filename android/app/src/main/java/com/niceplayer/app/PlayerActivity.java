@@ -81,6 +81,9 @@ public class PlayerActivity extends AppCompatActivity {
     private float[] equalizerGains;
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
     private boolean waveformEnabled, pipTransitionPending;
+    private boolean screenshotInProgress;
+    private long screenshotPlaybackPosition = -1;
+    private boolean screenshotWasPlaying;
     private long pipPlaybackPosition = -1;
     private boolean pipWasPlaying;
     private float waveformDragStartX, waveformDragStartY, waveformStartX, waveformStartY;
@@ -143,7 +146,8 @@ public class PlayerActivity extends AppCompatActivity {
         subtitleStyle = preferences.getInt("subtitle_style", 0);
         headphoneSafety = preferences.getBoolean("headphone_safety", true);
         autoPip = preferences.getBoolean("auto_pip", true);
-        waveformEnabled = preferences.getBoolean("waveform_enabled", false);
+        // Waveform is scoped to the current video and always starts off.
+        waveformEnabled = false;
         orientationLocked = preferences.getBoolean("orientation_locked", false);
         selectedRate = preferences.getFloat("playback_rate", 1f);
         ratioMode = preferences.getInt("ratio_mode", 0);
@@ -314,6 +318,7 @@ public class PlayerActivity extends AppCompatActivity {
         savePosition();
         playlistIndex = index;
         sourceUri = Uri.parse(playlistUris.get(index));
+        disableWaveformForNewVideo();
         positionRestoredForItem=false;
         softwareRetryAttempted = false;
         directUriRetryAttempted = false;
@@ -322,7 +327,6 @@ public class PlayerActivity extends AppCompatActivity {
         resetVideoZoom(false);
         startPlayback(true);
         if(waveform!=null)waveform.clearAnalysis();
-        if(waveformEnabled)handler.postDelayed(this::loadWaveform,500);
     }
 
     private void makeUi() {
@@ -378,13 +382,13 @@ public class PlayerActivity extends AppCompatActivity {
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
     }
-    private TextView addQuick(String text,View.OnClickListener click){TextView v=label(text,9);v.setLines(2);GradientDrawable background=new GradientDrawable();background.setShape(GradientDrawable.OVAL);background.setColor(0x7A111827);v.setBackground(background);v.setOnTouchListener((view,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});if(click!=null)v.setOnClickListener(click);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(58),dp(58));p.setMargins(dp(4),0,dp(4),0);quickTools.addView(v,p);return v;}
+    private TextView addQuick(String text,View.OnClickListener click){TextView v=label(text,9);v.setLines(2);v.setBackgroundColor(Color.TRANSPARENT);v.setOnTouchListener((view,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});if(click!=null)v.setOnClickListener(click);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(58),dp(58));p.setMargins(dp(4),0,dp(4),0);quickTools.addView(v,p);return v;}
 
     private void makeBottom() {
         bottom=new LinearLayout(this); bottom.setOrientation(LinearLayout.VERTICAL); bottom.setPadding(dp(10),0,dp(10),dp(6)); bottom.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout timeRow=new LinearLayout(this);timeRow.setGravity(Gravity.CENTER_VERTICAL);
-        currentTime=timeLabel("00:00",Gravity.START|Gravity.CENTER_VERTICAL);
-        totalTime=timeLabel("00:00",Gravity.CENTER);
+        totalTime=timeLabel("00:00",Gravity.START|Gravity.CENTER_VERTICAL);
+        currentTime=timeLabel("00:00",Gravity.CENTER);
         remainingTime=timeLabel("-00:00",Gravity.END|Gravity.CENTER_VERTICAL);
         timeRow.addView(totalTime,new LinearLayout.LayoutParams(0,dp(24),1));
         timeRow.addView(currentTime,new LinearLayout.LayoutParams(0,dp(24),1));
@@ -582,7 +586,8 @@ public class PlayerActivity extends AppCompatActivity {
     private void setControlsVisible(boolean visible){
         controls=visible;int visibility=visible?View.VISIBLE:View.GONE;
         top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);screenshotButton.setVisibility(visibility);
-        if(waveform!=null)waveform.setVisibility(visible&&waveformEnabled?View.VISIBLE:View.GONE);
+        // The waveform is an independent overlay; control auto-hide must not dismiss it.
+        if(waveform!=null)waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);
     }
     private void showControls(boolean restartTimer){
         if(locked)return;
@@ -622,7 +627,6 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void analyzeWaveform(){
         waveformEnabled=!waveformEnabled;
-        preferences.edit().putBoolean("waveform_enabled",waveformEnabled).apply();
         if(waveform==null)return;
         if(!waveformEnabled){waveform.setVisibility(View.GONE);waveform.clearAnalysis();Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
         showWaveformOverlay();
@@ -631,6 +635,11 @@ public class PlayerActivity extends AppCompatActivity {
         if(resumeAfterWaveform)player.pause();
         Toast.makeText(this,"Analyzing audio waveform…",Toast.LENGTH_SHORT).show();
         loadWaveform();
+    }
+    private void disableWaveformForNewVideo(){
+        waveformEnabled=false;
+        resumeAfterWaveform=false;
+        if(waveform!=null){waveform.setVisibility(View.GONE);waveform.clearAnalysis();}
     }
     private void soundProtectionMenu(){
         String[] modes={"Off","Low","Medium","Strong"};
@@ -877,17 +886,20 @@ public class PlayerActivity extends AppCompatActivity {
     private void screenshot(){
         View videoSurface=findVideoSurface(video);
         if(videoSurface==null||videoSurface.getWidth()<=0||videoSurface.getHeight()<=0){Toast.makeText(this,"Video frame is not ready",Toast.LENGTH_SHORT).show();return;}
+        screenshotInProgress=true;
+        screenshotPlaybackPosition=player==null?-1:Math.max(0,player.getTime());
+        screenshotWasPlaying=player!=null&&player.isPlaying();
         Bitmap bitmap=Bitmap.createBitmap(videoSurface.getWidth(),videoSurface.getHeight(),Bitmap.Config.ARGB_8888);
         if(videoSurface instanceof TextureView){
             Bitmap frame=((TextureView)videoSurface).getBitmap(bitmap);
-            if(frame!=null)saveVideoFrame(frame);else{bitmap.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}
+            if(frame!=null)saveVideoFrame(frame);else{bitmap.recycle();finishScreenshotCapture();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}
             return;
         }
         if(Build.VERSION.SDK_INT>=24&&videoSurface instanceof SurfaceView){
-            PixelCopy.request((SurfaceView)videoSurface,bitmap,result->{if(result==PixelCopy.SUCCESS)saveVideoFrame(bitmap);else{bitmap.recycle();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}},handler);
+            PixelCopy.request((SurfaceView)videoSurface,bitmap,result->{if(result==PixelCopy.SUCCESS)saveVideoFrame(bitmap);else{bitmap.recycle();finishScreenshotCapture();Toast.makeText(this,"Screenshot failed",Toast.LENGTH_SHORT).show();}},handler);
             return;
         }
-        bitmap.recycle();Toast.makeText(this,"Video-only screenshot is unavailable on this device",Toast.LENGTH_SHORT).show();
+        bitmap.recycle();finishScreenshotCapture();Toast.makeText(this,"Video-only screenshot is unavailable on this device",Toast.LENGTH_SHORT).show();
     }
     private View findVideoSurface(View view){
         if(view instanceof SurfaceView||view instanceof TextureView)return view;
@@ -931,9 +943,21 @@ public class PlayerActivity extends AppCompatActivity {
         if(cropWidth==bitmap.getWidth()&&cropHeight==bitmap.getHeight())return bitmap;
         return Bitmap.createBitmap(bitmap,left,top,cropWidth,cropHeight);
     }
-    private void save(Bitmap b){try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"NicePlayer_"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/NicePlayer");Uri u=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(u==null)throw new Exception();try(OutputStream s=getContentResolver().openOutputStream(u)){if(s==null||!b.compress(Bitmap.CompressFormat.JPEG,94,s))throw new Exception();}Toast.makeText(this,"Screenshot saved",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Could not save screenshot",Toast.LENGTH_LONG).show();}finally{b.recycle();}}
+    private void save(Bitmap b){try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"NicePlayer_"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/NicePlayer");Uri u=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(u==null)throw new Exception();try(OutputStream s=getContentResolver().openOutputStream(u)){if(s==null||!b.compress(Bitmap.CompressFormat.JPEG,94,s))throw new Exception();}Toast.makeText(this,"Screenshot saved",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Could not save screenshot",Toast.LENGTH_LONG).show();}finally{b.recycle();finishScreenshotCapture();}}
+    private void finishScreenshotCapture(){
+        if(!screenshotInProgress)return;
+        screenshotInProgress=false;
+        if(player!=null&&screenshotPlaybackPosition>=0){
+            long current=Math.max(0,player.getTime());
+            if(current+1200<screenshotPlaybackPosition)player.setTime(screenshotPlaybackPosition);
+            if(screenshotWasPlaying&&!player.isPlaying())player.play();
+        }
+        screenshotPlaybackPosition=-1;
+        screenshotWasPlaying=false;
+        immersive();
+    }
     private void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
-    @Override protected void onPause(){savePositionImmediately();surfaceRefreshPending=true;super.onPause();}
+    @Override protected void onPause(){savePositionImmediately();surfaceRefreshPending=!screenshotInProgress;super.onPause();}
     @Override protected void onResume(){
         super.onResume();
         if(!surfaceRefreshPending||player==null||video==null)return;
