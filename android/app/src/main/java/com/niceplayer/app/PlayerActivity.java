@@ -54,6 +54,7 @@ public class PlayerActivity extends AppCompatActivity {
     private WaveformView waveform;
     private GestureLevelView gestureLevel;
     private TextView play, currentTime, totalTime, remainingTime, hint, lock, title, screenshotButton;
+    private TextView rotationLockControl;
     private boolean dragging, controls = true, locked, orientationLocked;
     private boolean privateMode;
     private boolean softwareRetryAttempted;
@@ -85,6 +86,8 @@ public class PlayerActivity extends AppCompatActivity {
     private float waveformDragStartX, waveformDragStartY, waveformStartX, waveformStartY;
     private long pointA = -1, pointB = -1, audioDelay, subtitleDelay;
     private boolean resumeAfterWaveform;
+    private boolean surfaceRefreshPending;
+    private boolean positionRestoredForItem;
     private float selectedRate = 1f;
     private AudioFocusRequest focusRequest;
     private final ActivityResultLauncher<String[]> subtitlePicker = registerForActivityResult(
@@ -95,6 +98,9 @@ public class PlayerActivity extends AppCompatActivity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable hideLockButton = () -> {
         if (locked && lock != null) lock.setVisibility(View.GONE);
+    };
+    private final Runnable hideControlsAfterDelay = () -> {
+        if (!locked && player != null && player.isPlaying()) setControlsVisible(false);
     };
 
     private final Runnable ticker = new Runnable() {
@@ -138,6 +144,7 @@ public class PlayerActivity extends AppCompatActivity {
         headphoneSafety = preferences.getBoolean("headphone_safety", true);
         autoPip = preferences.getBoolean("auto_pip", true);
         waveformEnabled = preferences.getBoolean("waveform_enabled", false);
+        orientationLocked = preferences.getBoolean("orientation_locked", false);
         selectedRate = preferences.getFloat("playback_rate", 1f);
         ratioMode = preferences.getInt("ratio_mode", 0);
         audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
@@ -160,7 +167,8 @@ public class PlayerActivity extends AppCompatActivity {
         player.attachViews(video, null, false, false);
         player.setEventListener(e -> runOnUiThread(() -> {
             if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
-            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService(); }
+            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService();scheduleControlsHide(); }
+            else if (e.type == MediaPlayer.Event.Paused) showControls(false);
             else if (e.type == MediaPlayer.Event.EndReached) {
                 if (player.getLength() <= 0 || player.getTime() < 1000) handlePlaybackError();
                 else playAt(playlistIndex + 1);
@@ -171,7 +179,8 @@ public class PlayerActivity extends AppCompatActivity {
             finish();
             return;
         }
-        if(waveform!=null)waveform.setLevels(null);
+        if(orientationLocked)applyOrientationLock();
+        if(waveform!=null)waveform.clearAnalysis();
         if(waveformEnabled)handler.postDelayed(this::loadWaveform,500);
         handler.post(ticker);
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -254,7 +263,8 @@ public class PlayerActivity extends AppCompatActivity {
     private String positionKey() { return "position_" + sourceUri; }
 
     private void restorePosition() {
-        if(privateMode){pendingSeek=-1;preferences.edit().remove(positionKey()).apply();return;}
+        if(positionRestoredForItem)return;
+        positionRestoredForItem=true;
         if (pendingSeek >= 0) {
             player.setTime(pendingSeek);
             pendingSeek = -1;
@@ -263,7 +273,6 @@ public class PlayerActivity extends AppCompatActivity {
         long saved = preferences.getLong(positionKey(), 0);
         long length = player.getLength();
         if (saved > 5000 && (length <= 0 || saved < length - 10000)) player.setTime(saved);
-        preferences.edit().remove(positionKey()).apply();
     }
 
     private void requestAudioFocus(){
@@ -280,7 +289,6 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void savePosition() {
         if (player == null || sourceUri == null) return;
-        if(privateMode){forgetCurrentVideo();return;}
         long at = player.getTime(), length = player.getLength();
         SharedPreferences.Editor edit = preferences.edit();
         if (at > 5000 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
@@ -289,7 +297,6 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void savePositionImmediately() {
         if (player == null || sourceUri == null) return;
-        if(privateMode){forgetCurrentVideo();return;}
         long at = player.getTime(), length = player.getLength();
         SharedPreferences.Editor edit = preferences.edit();
         if (at > 0 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
@@ -297,7 +304,7 @@ public class PlayerActivity extends AppCompatActivity {
         edit.commit();
     }
     private void recordHistory(){String uri=sourceUri.toString(),name=currentTitle();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();uris.add(uri);names.add(name);for(int i=0;i<12;i++){String old=preferences.getString("history_uri_"+i,null);if(old!=null&&!old.equals(uri)){uris.add(old);names.add(preferences.getString("history_name_"+i,"Video"));if(uris.size()==12)break;}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
-    private void forgetCurrentVideo(){if(preferences==null||sourceUri==null)return;String hiddenUri=sourceUri.toString();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri!=null&&!uri.equals(hiddenUri)){uris.add(uri);names.add(preferences.getString("history_name_"+i,"Video"));}}SharedPreferences.Editor e=preferences.edit().remove("position_"+hiddenUri);for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
+    private void forgetCurrentVideo(){if(preferences==null||sourceUri==null)return;String hiddenUri=sourceUri.toString();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri!=null&&!uri.equals(hiddenUri)){uris.add(uri);names.add(preferences.getString("history_name_"+i,"Video"));}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
 
     private void playAt(int index) {
         if (index < 0 || index >= playlistUris.size()) {
@@ -307,13 +314,14 @@ public class PlayerActivity extends AppCompatActivity {
         savePosition();
         playlistIndex = index;
         sourceUri = Uri.parse(playlistUris.get(index));
+        positionRestoredForItem=false;
         softwareRetryAttempted = false;
         directUriRetryAttempted = false;
         title.setText(currentTitle());
         player.stop();
         resetVideoZoom(false);
         startPlayback(true);
-        if(waveform!=null)waveform.setLevels(null);
+        if(waveform!=null)waveform.clearAnalysis();
         if(waveformEnabled)handler.postDelayed(this::loadWaveform,500);
     }
 
@@ -341,8 +349,9 @@ public class PlayerActivity extends AppCompatActivity {
         gestures.setOnTouchListener((v,e) -> gesture(e, detector));
         FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(-1,-1); gp.topMargin=dp(134); gp.bottomMargin=dp(118); root.addView(gestures,gp);
         makeTop();makeQuickTools();makeBottom();createFloatingWaveform();
-        lock = label("🔓", 17);GradientDrawable lockBackground=new GradientDrawable();lockBackground.setShape(GradientDrawable.OVAL);lockBackground.setColor(0xCC111827);lock.setBackground(lockBackground);lock.setOnClickListener(v -> toggleLock());
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(38); root.addView(lock,lp);
+        lock = label("🔓", 17);GradientDrawable lockBackground=new GradientDrawable();lockBackground.setShape(GradientDrawable.OVAL);lockBackground.setColor(Color.TRANSPARENT);lock.setBackground(lockBackground);lock.setOnClickListener(v -> toggleLock());
+        lock.setOnTouchListener((view,event)->{int action=event.getActionMasked();if(action==MotionEvent.ACTION_DOWN)lockBackground.setColor(0x88111827);else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL)lockBackground.setColor(Color.TRANSPARENT);view.invalidate();return false;});
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(13); root.addView(lock,lp);
         screenshotButton = topCircle("📷", 23);
         screenshotButton.setBackgroundColor(Color.TRANSPARENT);screenshotButton.setAlpha(.5f);screenshotButton.setContentDescription("Take screenshot");screenshotButton.setOnClickListener(v->screenshot());
         FrameLayout.LayoutParams screenshotParams=new FrameLayout.LayoutParams(dp(48),dp(48),Gravity.END|Gravity.CENTER_VERTICAL);screenshotParams.rightMargin=dp(18);root.addView(screenshotButton,screenshotParams);
@@ -360,16 +369,16 @@ public class PlayerActivity extends AppCompatActivity {
         TextView more=topCircle("⋮",26); more.setOnClickListener(v->moreMenu(more)); top.addView(more,topButtonParams(46));
         root.addView(top,new FrameLayout.LayoutParams(-1,dp(60),Gravity.TOP));
     }
-    private TextView topCircle(String text,int size){TextView view=label(text,size);view.setShadowLayer(dp(3),0,dp(1),Color.BLACK);view.setBackgroundColor(Color.TRANSPARENT);return view;}
+    private TextView topCircle(String text,int size){TextView view=label(text,size);view.setShadowLayer(dp(3),0,dp(1),Color.BLACK);view.setBackgroundColor(Color.TRANSPARENT);view.setOnTouchListener((v,e)->{if(e.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});return view;}
     private LinearLayout.LayoutParams topButtonParams(int size){LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(size),dp(size));params.setMargins(dp(3),0,dp(3),0);return params;}
 
     private void makeQuickTools(){android.widget.HorizontalScrollView scroll=new android.widget.HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);scroll.setBackgroundColor(Color.TRANSPARENT);quickTools=new LinearLayout(this);quickTools.setGravity(Gravity.CENTER_VERTICAL);quickTools.setPadding(dp(8),dp(5),dp(8),dp(5));
         addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("⊕\nPINCH",v->zoomMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());
-        TextView rotationLock=addQuick("ROTATION\nLOCK",null);rotationLock.setOnClickListener(v->toggleOrientationLock(rotationLock));
+        rotationLockControl=addQuick(orientationLocked?"ROTATION\nLOCKED":"ROTATION\nLOCK",null);rotationLockControl.setOnClickListener(v->toggleOrientationLock(rotationLockControl));
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
     }
-    private TextView addQuick(String text,View.OnClickListener click){TextView v=label(text,9);v.setLines(2);GradientDrawable background=new GradientDrawable();background.setShape(GradientDrawable.OVAL);background.setColor(0x7A111827);v.setBackground(background);if(click!=null)v.setOnClickListener(click);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(58),dp(58));p.setMargins(dp(4),0,dp(4),0);quickTools.addView(v,p);return v;}
+    private TextView addQuick(String text,View.OnClickListener click){TextView v=label(text,9);v.setLines(2);GradientDrawable background=new GradientDrawable();background.setShape(GradientDrawable.OVAL);background.setColor(0x7A111827);v.setBackground(background);v.setOnTouchListener((view,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});if(click!=null)v.setOnClickListener(click);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(58),dp(58));p.setMargins(dp(4),0,dp(4),0);quickTools.addView(v,p);return v;}
 
     private void makeBottom() {
         bottom=new LinearLayout(this); bottom.setOrientation(LinearLayout.VERTICAL); bottom.setPadding(dp(10),0,dp(10),dp(6)); bottom.setBackgroundColor(Color.TRANSPARENT);
@@ -377,20 +386,23 @@ public class PlayerActivity extends AppCompatActivity {
         currentTime=timeLabel("00:00",Gravity.START|Gravity.CENTER_VERTICAL);
         totalTime=timeLabel("00:00",Gravity.CENTER);
         remainingTime=timeLabel("-00:00",Gravity.END|Gravity.CENTER_VERTICAL);
-        timeRow.addView(currentTime,new LinearLayout.LayoutParams(0,dp(24),1));
         timeRow.addView(totalTime,new LinearLayout.LayoutParams(0,dp(24),1));
+        timeRow.addView(currentTime,new LinearLayout.LayoutParams(0,dp(24),1));
         timeRow.addView(remainingTime,new LinearLayout.LayoutParams(0,dp(24),1));
         bottom.addView(timeRow,new LinearLayout.LayoutParams(-1,dp(24)));
         seek=new SeekBar(this); seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onStartTrackingTouch(SeekBar b){dragging=true;} public void onProgressChanged(SeekBar b,int n,boolean from){if(from)updateTimeLabels(n,Math.max(0,player.getLength()));}
-            public void onStopTrackingTouch(SeekBar b){player.setTime(b.getProgress());dragging=false;}
+            public void onStartTrackingTouch(SeekBar b){dragging=true;handler.removeCallbacks(hideControlsAfterDelay);} public void onProgressChanged(SeekBar b,int n,boolean from){if(from)updateTimeLabels(n,Math.max(0,player.getLength()));}
+            public void onStopTrackingTouch(SeekBar b){player.setTime(b.getProgress());dragging=false;scheduleControlsHide();}
         }); bottom.addView(seek,new LinearLayout.LayoutParams(-1,dp(30)));
         LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER);
         addControl(row,"|◀",21,v->playAt(playlistIndex-1),48); addControl(row,"↶ 10",18,v->jump(-TEN_SECONDS),48);
         play=addControl(row,"▶",31,v->{if(player.isPlaying())player.pause();else player.play();},58);
         addControl(row,"10 ↷",18,v->jump(TEN_SECONDS),48);
         addControl(row,"▶|",21,v->playAt(playlistIndex+1),48);
-        bottom.addView(row,new LinearLayout.LayoutParams(-1,dp(55)));
+        FrameLayout controlsLayer=new FrameLayout(this);controlsLayer.addView(row,new FrameLayout.LayoutParams(-2,dp(55),Gravity.CENTER));
+        TextView subtitles=label("CC",14);subtitles.setTypeface(android.graphics.Typeface.DEFAULT,android.graphics.Typeface.BOLD);subtitles.setContentDescription("Subtitles");subtitles.setOnTouchListener((v,e)->{if(e.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});subtitles.setOnClickListener(v->subtitleTracks());
+        FrameLayout.LayoutParams subtitleParams=new FrameLayout.LayoutParams(dp(48),dp(48),Gravity.END|Gravity.CENTER_VERTICAL);subtitleParams.rightMargin=dp(8);controlsLayer.addView(subtitles,subtitleParams);
+        bottom.addView(controlsLayer,new LinearLayout.LayoutParams(-1,dp(55)));
         root.addView(bottom,new FrameLayout.LayoutParams(-1,dp(115),Gravity.BOTTOM));
     }
 
@@ -404,12 +416,12 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void loadWaveform(){
         if(waveform==null||!waveformEnabled)return;
-        waveform.setLevels(null);
+        waveform.clearAnalysis();
         Uri uri=sourceUri;
         long duration=Math.max(0,player.getLength());
         int buckets=(int)Math.max(600,Math.min(72_000,duration/100L));
         worker.execute(()->AudioWaveformExtractor.extract(this,uri,buckets,new AudioWaveformExtractor.Callback(){
-            public void complete(float[] levels){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null&&waveformEnabled)waveform.setLevels(levels);finishWaveformAnalysis();});}
+            public void complete(AudioWaveformExtractor.Result result){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null&&waveformEnabled)waveform.setAnalysis(result);finishWaveformAnalysis();});}
             public void failed(){runOnUiThread(()->{Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();});}
         }));
     }
@@ -475,11 +487,13 @@ public class PlayerActivity extends AppCompatActivity {
         v.setOnTouchListener((buttonView,event)->{
             int action=event.getActionMasked();
             if(action==MotionEvent.ACTION_DOWN){
+                showControls(false);
                 circle.setColor(0xCC172554);circle.setStroke(dp(2),0xFF7C6CFF);
                 buttonView.animate().scaleX(.96f).scaleY(.96f).setDuration(70).start();buttonView.invalidate();
             }else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL){
                 circle.setColor(Color.TRANSPARENT);circle.setStroke(dp(1),Color.TRANSPARENT);
                 buttonView.animate().scaleX(1f).scaleY(1f).setDuration(120).start();buttonView.invalidate();
+                scheduleControlsHide();
             }
             return false;
         });
@@ -563,14 +577,26 @@ public class PlayerActivity extends AppCompatActivity {
             if(lock.getVisibility()==View.VISIBLE)handler.postDelayed(hideLockButton,2200);
             return;
         }
-        controls=!controls;
-        int visibility=controls?View.VISIBLE:View.GONE;
+        showControls(true);
+    }
+    private void setControlsVisible(boolean visible){
+        controls=visible;int visibility=visible?View.VISIBLE:View.GONE;
         top.setVisibility(visibility);bottom.setVisibility(visibility);((View)quickTools.getTag()).setVisibility(visibility);lock.setVisibility(visibility);screenshotButton.setVisibility(visibility);
+        if(waveform!=null)waveform.setVisibility(visible&&waveformEnabled?View.VISIBLE:View.GONE);
+    }
+    private void showControls(boolean restartTimer){
+        if(locked)return;
+        handler.removeCallbacks(hideControlsAfterDelay);setControlsVisible(true);
+        if(restartTimer)scheduleControlsHide();
+    }
+    private void scheduleControlsHide(){
+        handler.removeCallbacks(hideControlsAfterDelay);
+        if(!locked&&player!=null&&player.isPlaying())handler.postDelayed(hideControlsAfterDelay,3000);
     }
     private void toggleLock(){
-        locked=!locked;handler.removeCallbacks(hideLockButton);lock.setText(locked?"🔒":"🔓");
-        if(locked){top.setVisibility(View.GONE);bottom.setVisibility(View.GONE);((View)quickTools.getTag()).setVisibility(View.GONE);screenshotButton.setVisibility(View.GONE);lock.setVisibility(View.VISIBLE);controls=false;handler.postDelayed(hideLockButton,2200);}
-        else{top.setVisibility(View.VISIBLE);bottom.setVisibility(View.VISIBLE);((View)quickTools.getTag()).setVisibility(View.VISIBLE);screenshotButton.setVisibility(View.VISIBLE);lock.setVisibility(View.VISIBLE);controls=true;}
+        locked=!locked;handler.removeCallbacks(hideLockButton);handler.removeCallbacks(hideControlsAfterDelay);lock.setText(locked?"🔒":"🔓");
+        if(locked){setControlsVisible(false);lock.setVisibility(View.VISIBLE);handler.postDelayed(hideLockButton,2200);}
+        else{setControlsVisible(true);scheduleControlsHide();}
     }
     private void moreMenu(TextView anchor){
         android.view.ContextThemeWrapper popupContext=new android.view.ContextThemeWrapper(this,R.style.NicePlayerPopupTheme);
@@ -583,21 +609,22 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,14,6,"Audio cleanup");
         m.getMenu().add(0,8,7,"Headphone safety: "+(headphoneSafety?"On":"Off"));
         m.getMenu().add(0,9,8,"Add external subtitle");
-        m.getMenu().add(0,10,9,"Audio / subtitle sync");
-        m.getMenu().add(0,11,10,"A–B repeat");
-        m.getMenu().add(0,12,11,"Next frame");
-        m.getMenu().add(0,13,12,"Playback diagnostics");
-        m.getMenu().add(0,16,13,"Subtitle appearance");
-        m.getMenu().add(0,17,14,"Playlist");
-        m.getMenu().add(0,18,15,"Audio waveform: "+(waveformEnabled?"On":"Off"));
-        if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,16,"Picture in picture");m.getMenu().add(0,15,17,"Auto pop-up: "+(autoPip?"On":"Off"));}
-        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:syncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;}return true;});m.show();
+        m.getMenu().add(0,10,9,"Audio sync");
+        m.getMenu().add(0,19,10,"Subtitle sync");
+        m.getMenu().add(0,11,11,"A–B repeat");
+        m.getMenu().add(0,12,12,"Next frame");
+        m.getMenu().add(0,13,13,"Playback diagnostics");
+        m.getMenu().add(0,16,14,"Subtitle appearance");
+        m.getMenu().add(0,17,15,"Playlist");
+        m.getMenu().add(0,18,16,"Audio waveform: "+(waveformEnabled?"On":"Off"));
+        if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,17,"Picture in picture");m.getMenu().add(0,15,18,"Auto pop-up: "+(autoPip?"On":"Off"));}
+        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:audioSyncMenu();break;case 19:subtitleSyncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;}return true;});m.show();
     }
     private void analyzeWaveform(){
         waveformEnabled=!waveformEnabled;
         preferences.edit().putBoolean("waveform_enabled",waveformEnabled).apply();
         if(waveform==null)return;
-        if(!waveformEnabled){waveform.setVisibility(View.GONE);waveform.setLevels(null);Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
+        if(!waveformEnabled){waveform.setVisibility(View.GONE);waveform.clearAnalysis();Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
         showWaveformOverlay();
         Toast.makeText(this,"Audio waveform on",Toast.LENGTH_SHORT).show();
         resumeAfterWaveform=player.isPlaying();
@@ -735,10 +762,15 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void toggleHeadphoneSafety(){headphoneSafety=!headphoneSafety;preferences.edit().putBoolean("headphone_safety",headphoneSafety).apply();Toast.makeText(this,"Headphone safety: "+(headphoneSafety?"On":"Off"),Toast.LENGTH_SHORT).show();if(headphoneSafety)applySafeStart();}
     private void stepFrame(){if(player.isPlaying())player.pause();player.setTime(Math.max(0,player.getTime()+40));}
-    private void syncMenu(){
-        String[] items={"Audio −50 ms","Audio +50 ms","Subtitle −100 ms","Subtitle +100 ms","Reset synchronization"};
-        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Audio / subtitle sync").setItems(items,(d,n)->{if(n==0)audioDelay-=50000;else if(n==1)audioDelay+=50000;else if(n==2)subtitleDelay-=100000;else if(n==3)subtitleDelay+=100000;else{audioDelay=0;subtitleDelay=0;}player.setAudioDelay(audioDelay);player.setSpuDelay(subtitleDelay);Toast.makeText(this,"Audio "+audioDelay/1000+" ms · Subtitle "+subtitleDelay/1000+" ms",Toast.LENGTH_SHORT).show();}).show();
+    private void audioSyncMenu(){
+        String[] items={"− 50 ms","+ 50 ms","Reset to 0 ms"};
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Audio sync · "+signedMs(audioDelay)).setItems(items,(d,n)->{if(n==0)audioDelay-=50000;else if(n==1)audioDelay+=50000;else audioDelay=0;player.setAudioDelay(audioDelay);Toast.makeText(this,"Audio sync "+signedMs(audioDelay),Toast.LENGTH_SHORT).show();}).show();
     }
+    private void subtitleSyncMenu(){
+        String[] items={"− 50 ms","+ 50 ms","Reset to 0 ms"};
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Subtitle sync · "+signedMs(subtitleDelay)).setItems(items,(d,n)->{if(n==0)subtitleDelay-=50000;else if(n==1)subtitleDelay+=50000;else subtitleDelay=0;player.setSpuDelay(subtitleDelay);Toast.makeText(this,"Subtitle sync "+signedMs(subtitleDelay),Toast.LENGTH_SHORT).show();}).show();
+    }
+    private String signedMs(long microseconds){long milliseconds=microseconds/1000;return (milliseconds>0?"+":"")+milliseconds+" ms";}
     private void abRepeatMenu(){String[] items={pointA<0?"Set point A":"Reset point A ("+clock(pointA)+")",pointA>=0?"Set point B":"Set point A first","Clear A–B repeat"};new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("A–B repeat").setItems(items,(d,n)->{if(n==0){pointA=player.getTime();pointB=-1;Toast.makeText(this,"Point A: "+clock(pointA),Toast.LENGTH_SHORT).show();}else if(n==1&&pointA>=0){pointB=player.getTime();if(pointB<=pointA){pointA=pointB;pointB=-1;Toast.makeText(this,"Point A moved. Now set point B",Toast.LENGTH_SHORT).show();}else Toast.makeText(this,"A–B repeat active",Toast.LENGTH_SHORT).show();}else if(n==2){pointA=pointB=-1;Toast.makeText(this,"A–B repeat cleared",Toast.LENGTH_SHORT).show();}}).show();}
     private void showDiagnostics(){String message="File: "+currentTitle()+"\nURI: "+sourceUri+"\nDuration: "+clock(player.getLength())+"\nPosition: "+clock(player.getTime())+"\nDecoder fallback: "+(softwareRetryAttempted?"Software":"Hardware")+"\nAudio protection: "+soundProtection+"\nAudio cleanup: "+audioCleanup+"\nAudio delay: "+audioDelay/1000+" ms\nSubtitle delay: "+subtitleDelay/1000+" ms";new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Playback diagnostics").setMessage(message).setPositiveButton("Copy",(d,n)->{android.content.ClipboardManager c=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);c.setPrimaryClip(android.content.ClipData.newPlainText("NicePlayer diagnostics",message));}).setNegativeButton("Close",null).show();}
     private void audioTracks(){
@@ -828,14 +860,19 @@ public class PlayerActivity extends AppCompatActivity {
     private void rotate(){int o=getResources().getConfiguration().orientation;setRequestedOrientation(o==android.content.res.Configuration.ORIENTATION_LANDSCAPE?ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);}
     private void toggleOrientationLock(TextView control){
         orientationLocked=!orientationLocked;
+        preferences.edit().putBoolean("orientation_locked",orientationLocked).apply();
         if(orientationLocked){
-            int orientation=getResources().getConfiguration().orientation;
-            setRequestedOrientation(orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE?ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            applyOrientationLock();
             control.setText("ROTATION\nLOCKED");Toast.makeText(this,"Screen rotation locked",Toast.LENGTH_SHORT).show();
         }else{
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
             control.setText("ROTATION\nLOCK");Toast.makeText(this,"Auto-rotate enabled",Toast.LENGTH_SHORT).show();
         }
+    }
+    private void applyOrientationLock(){
+        int orientation=getResources().getConfiguration().orientation;
+        setRequestedOrientation(orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE?ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        if(rotationLockControl!=null)rotationLockControl.setText("ROTATION\nLOCKED");
     }
     private void screenshot(){
         View videoSurface=findVideoSurface(video);
@@ -896,7 +933,18 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void save(Bitmap b){try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"NicePlayer_"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/NicePlayer");Uri u=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(u==null)throw new Exception();try(OutputStream s=getContentResolver().openOutputStream(u)){if(s==null||!b.compress(Bitmap.CompressFormat.JPEG,94,s))throw new Exception();}Toast.makeText(this,"Screenshot saved",Toast.LENGTH_SHORT).show();}catch(Exception e){Toast.makeText(this,"Could not save screenshot",Toast.LENGTH_LONG).show();}finally{b.recycle();}}
     private void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
-    @Override protected void onPause(){savePosition();super.onPause();}
+    @Override protected void onPause(){savePositionImmediately();surfaceRefreshPending=true;super.onPause();}
+    @Override protected void onResume(){
+        super.onResume();
+        if(!surfaceRefreshPending||player==null||video==null)return;
+        surfaceRefreshPending=false;
+        handler.postDelayed(()->{
+            if(player==null||video==null||isFinishing())return;
+            long position=Math.max(0,player.getTime());boolean wasPlaying=player.isPlaying();
+            try{player.detachViews();player.attachViews(video,null,false,false);player.setTime(position);if(wasPlaying&&!player.isPlaying())player.play();video.requestLayout();video.invalidate();}
+            catch(Exception error){Log.w(TAG,"Video surface refresh failed",error);}
+        },120);
+    }
     @Override protected void onUserLeaveHint(){super.onUserLeaveHint();if(autoPip&&Build.VERSION.SDK_INT>=26&&player!=null&&player.isPlaying()&&!isInPictureInPictureMode())enterPip();}
     @Override public void onPictureInPictureModeChanged(boolean inPictureInPictureMode, android.content.res.Configuration newConfig){
         super.onPictureInPictureModeChanged(inPictureInPictureMode,newConfig);
