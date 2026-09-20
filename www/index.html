@@ -427,6 +427,16 @@
         function isHidden(kind,item){return !!(item&&item.dotHidden)||isManuallyHidden(kind,item)||isKeywordHidden(kind,item);}
         function playedVideoUris(){return storedList('played_video_uris');}
         function markVideoPlayed(uri){const played=playedVideoUris();if(!played.includes(uri)){played.push(uri);localStorage.setItem('played_video_uris',JSON.stringify(played));}}
+        function newVideoBaseline(){
+            let value=Number(localStorage.getItem('new_video_baseline_seconds'));
+            if(!Number.isFinite(value)||value<=0){value=Math.floor(Date.now()/1000);localStorage.setItem('new_video_baseline_seconds',String(value));}
+            return value;
+        }
+        function isNewDownloadedVideo(item){
+            const folder=(String(item&&item.relativePath||'')+' '+String(item&&item.bucketName||'')).toLowerCase();
+            const downloaded=/(^|[\s\\/])downloads?([\s\\/]|$)/.test(folder);
+            return downloaded&&Number(item&&item.dateAdded||0)>newVideoBaseline()&&!playedVideoUris().includes(item.uri);
+        }
         function videoIsHidden(item){return isHidden('video',item)||(item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||'',dotHidden:item.dotHidden}));}
 
         let noticeTimer;
@@ -570,13 +580,15 @@
                 const thumb = document.createElement('div'); thumb.className = 'video-thumb';
                 thumb.textContent = '▶';
                 if (item.duration) { const badge = document.createElement('span'); badge.className = 'thumb-duration'; badge.textContent = formatTime(item.duration / 1000); thumb.appendChild(badge); }
-                if (!playedVideoUris().includes(item.uri)) { const badge = document.createElement('span'); badge.className = 'thumb-new'; badge.textContent = 'NEW'; thumb.appendChild(badge); }
+                if (isNewDownloadedVideo(item)) { const badge = document.createElement('span'); badge.className = 'thumb-new'; badge.textContent = 'NEW'; thumb.appendChild(badge); }
                 const info = document.createElement('div'); info.className = 'video-info';
                 const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
                 const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size) + (item.duration ? ' · ' + formatTime(item.duration / 1000) : '')+(duplicateCount[item.name+'|'+item.size]>1?' · Possible duplicate':'');
                 const menu=document.createElement('button');menu.className='item-menu';menu.textContent='⋮';menu.addEventListener('click',event=>{event.stopPropagation();showMediaActions('video',item);});
                 info.append(name, meta); row.append(thumb, info,menu);
                 row.addEventListener('click', async () => {
+                    markVideoPlayed(item.uri);
+                    const newBadge=thumb.querySelector('.thumb-new');if(newBadge)newBadge.remove();
                     const plugin = videoLibraryPlugin();
                     if (plugin && plugin.playVideo) {
                         await plugin.playVideo({
