@@ -637,7 +637,7 @@ public class PlayerActivity extends AppCompatActivity {
         }).show();
     }
 
-    private void jump(long amount){long len=Math.max(0,player.getLength());player.setTime(Math.max(0,Math.min(len,player.getTime()+amount)));hint.setText(amount>0?"+10 seconds":"−10 seconds");hint.setVisibility(View.VISIBLE);handler.postDelayed(()->hint.setVisibility(View.GONE),550);}
+    private void jump(long amount){long len=Math.max(0,player.getLength());player.setTime(Math.max(0,Math.min(len,player.getTime()+amount)));long seconds=Math.max(1,Math.abs(amount)/1000);hint.setText((amount>0?"+":"−")+seconds+" seconds");hint.setVisibility(View.VISIBLE);handler.postDelayed(()->hint.setVisibility(View.GONE),550);}
     private void togglePlaybackFromGesture(){
         if(player==null)return;
         if(player.isPlaying()){player.pause();hint.setText("Paused");}
