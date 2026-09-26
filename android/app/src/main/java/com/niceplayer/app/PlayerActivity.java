@@ -82,6 +82,11 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
     private boolean waveformEnabled, pipTransitionPending;
     private boolean temporaryDoubleSpeed;
+    private boolean gesturesEnabled = true, requireHoldToUnlock = true, audioOnly;
+    private int gestureSeekSeconds = 10, repeatMode;
+    private float holdSpeed = 2f;
+    private boolean shuffleEnabled;
+    private int subtitlePosition, subtitleEncoding;
     private boolean screenshotInProgress;
     private long screenshotPlaybackPosition = -1;
     private boolean screenshotWasPlaying;
@@ -145,13 +150,20 @@ public class PlayerActivity extends AppCompatActivity {
         equalizerEnabled = preferences.getBoolean("equalizer_enabled", audioCleanup > 0);
         equalizerPreamp = preferences.getFloat("equalizer_preamp", 0f);
         subtitleStyle = preferences.getInt("subtitle_style", 0);
+        gesturesEnabled = preferences.getBoolean("gestures_enabled", true);
+        gestureSeekSeconds = preferences.getInt("gesture_seek_seconds", 10);
+        holdSpeed = preferences.getFloat("hold_speed", 2f);
+        requireHoldToUnlock = preferences.getBoolean("hold_to_unlock", true);
+        repeatMode = preferences.getInt("playlist_repeat_mode", 0);
+        shuffleEnabled = preferences.getBoolean("playlist_shuffle", false);
         headphoneSafety = preferences.getBoolean("headphone_safety", true);
         autoPip = preferences.getBoolean("auto_pip", true);
         // Waveform is scoped to the current video and always starts off.
         waveformEnabled = false;
         orientationLocked = preferences.getBoolean("orientation_locked", false);
-        selectedRate = preferences.getFloat("playback_rate", 1f);
+        selectedRate = preferences.getFloat(videoKey("rate"), preferences.getFloat("playback_rate", 1f));
         ratioMode = preferences.getInt("ratio_mode", 0);
+        loadPerVideoSettings();
         audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},91);
         IntentFilter noisyFilter=new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
@@ -172,11 +184,11 @@ public class PlayerActivity extends AppCompatActivity {
         player.attachViews(video, null, false, false);
         player.setEventListener(e -> runOnUiThread(() -> {
             if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
-            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService();scheduleControlsHide(); }
+            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();applyAudioOnly();startPlaybackService();scheduleControlsHide(); }
             else if (e.type == MediaPlayer.Event.Paused) showControls(false);
             else if (e.type == MediaPlayer.Event.EndReached) {
                 if (player.getLength() <= 0 || player.getTime() < 1000) handlePlaybackError();
-                else playAt(playlistIndex + 1);
+                else {markCurrentWatched();playNextForMode();}
             }
         }));
         if (!startPlayback(true)) {
@@ -184,7 +196,7 @@ public class PlayerActivity extends AppCompatActivity {
             finish();
             return;
         }
-        if(orientationLocked)applyOrientationLock();
+        if(orientationLocked)applyOrientationLock();else applyRememberedOrientation();
         if(waveform!=null)waveform.clearAnalysis();
         if(waveformEnabled)handler.postDelayed(this::loadWaveform,500);
         handler.post(ticker);
@@ -226,6 +238,9 @@ public class PlayerActivity extends AppCompatActivity {
             if(subtitleStyle==1)media.addOption(":freetype-fontsize=18");
             else if(subtitleStyle==2){media.addOption(":freetype-fontsize=28");media.addOption(":freetype-color=16776960");}
             else if(subtitleStyle==3){media.addOption(":freetype-fontsize=32");media.addOption(":sub-margin=80");}
+            if(subtitlePosition!=0)media.addOption(":sub-margin="+subtitlePosition);
+            String[] encodings={"","UTF-8","Windows-1252","ISO-8859-1","CP1256"};
+            if(subtitleEncoding>0&&subtitleEncoding<encodings.length)media.addOption(":subsdec-encoding="+encodings[subtitleEncoding]);
             player.setMedia(media);
             media.release();
             requestAudioFocus();
@@ -266,6 +281,26 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private String positionKey() { return "position_" + sourceUri; }
+    private String videoKey(String setting) { return "video_" + setting + "_" + sourceUri; }
+
+    private void loadPerVideoSettings(){
+        selectedRate=preferences.getFloat(videoKey("rate"),preferences.getFloat("playback_rate",1f));
+        ratioMode=preferences.getInt(videoKey("ratio"),preferences.getInt("ratio_mode",0));
+        audioDelay=preferences.getLong(videoKey("audio_delay"),0);
+        subtitleDelay=preferences.getLong(videoKey("subtitle_delay"),0);
+        subtitleStyle=preferences.getInt(videoKey("subtitle_style"),preferences.getInt("subtitle_style",0));
+        subtitlePosition=preferences.getInt(videoKey("subtitle_position"),0);
+        subtitleEncoding=preferences.getInt(videoKey("subtitle_encoding"),0);
+    }
+
+    private void savePerVideoSettings(){
+        if(sourceUri==null)return;
+        preferences.edit().putFloat(videoKey("rate"),selectedRate).putInt(videoKey("ratio"),ratioMode)
+                .putLong(videoKey("audio_delay"),audioDelay).putLong(videoKey("subtitle_delay"),subtitleDelay)
+                .putInt(videoKey("subtitle_style"),subtitleStyle).putInt(videoKey("subtitle_position"),subtitlePosition)
+                .putInt(videoKey("subtitle_encoding"),subtitleEncoding)
+                .putInt(videoKey("orientation"),getResources().getConfiguration().orientation).apply();
+    }
 
     private void restorePosition() {
         if(positionRestoredForItem)return;
@@ -277,7 +312,13 @@ public class PlayerActivity extends AppCompatActivity {
         }
         long saved = preferences.getLong(positionKey(), 0);
         long length = player.getLength();
-        if (saved > 5000 && (length <= 0 || saved < length - 10000)) player.setTime(saved);
+        if (saved > 5000 && (length <= 0 || saved < length - 10000)) {
+            positionRestoredForItem=true;
+            new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Resume playback?")
+                    .setMessage("Continue from "+clock(saved)+" or start from the beginning.")
+                    .setPositiveButton("Resume",(d,n)->player.setTime(saved))
+                    .setNegativeButton("Start over",(d,n)->{preferences.edit().remove(positionKey()).apply();player.setTime(0);}).show();
+        }
     }
 
     private void requestAudioFocus(){
@@ -296,8 +337,8 @@ public class PlayerActivity extends AppCompatActivity {
         if (player == null || sourceUri == null) return;
         long at = player.getTime(), length = player.getLength();
         SharedPreferences.Editor edit = preferences.edit();
-        if (at > 5000 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
-        else edit.remove(positionKey());
+        if (at > 5000 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at).putLong("duration_"+sourceUri,length).putBoolean("watched_"+sourceUri,false);
+        else edit.remove(positionKey()).putLong("duration_"+sourceUri,length).putBoolean("watched_"+sourceUri,length>0&&at>=length-10000);
         edit.apply();
     }
     private void savePositionImmediately() {
@@ -307,7 +348,9 @@ public class PlayerActivity extends AppCompatActivity {
         if (at > 0 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
         else edit.remove(positionKey());
         edit.commit();
+        savePerVideoSettings();
     }
+    private void markCurrentWatched(){if(sourceUri!=null)preferences.edit().remove(positionKey()).putBoolean("watched_"+sourceUri,true).putLong("duration_"+sourceUri,Math.max(0,player.getLength())).apply();}
     private void recordHistory(){String uri=sourceUri.toString(),name=currentTitle();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();uris.add(uri);names.add(name);for(int i=0;i<12;i++){String old=preferences.getString("history_uri_"+i,null);if(old!=null&&!old.equals(uri)){uris.add(old);names.add(preferences.getString("history_name_"+i,"Video"));if(uris.size()==12)break;}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
     private void forgetCurrentVideo(){if(preferences==null||sourceUri==null)return;String hiddenUri=sourceUri.toString();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri!=null&&!uri.equals(hiddenUri)){uris.add(uri);names.add(preferences.getString("history_name_"+i,"Video"));}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
 
@@ -319,6 +362,7 @@ public class PlayerActivity extends AppCompatActivity {
         savePosition();
         playlistIndex = index;
         sourceUri = Uri.parse(playlistUris.get(index));
+        loadPerVideoSettings();
         disableWaveformForNewVideo();
         positionRestoredForItem=false;
         softwareRetryAttempted = false;
@@ -327,6 +371,7 @@ public class PlayerActivity extends AppCompatActivity {
         player.stop();
         resetVideoZoom(false);
         startPlayback(true);
+        if(!orientationLocked)applyRememberedOrientation();
         if(waveform!=null)waveform.clearAnalysis();
     }
 
@@ -342,19 +387,19 @@ public class PlayerActivity extends AppCompatActivity {
             @Override public boolean onDown(MotionEvent e) { return true; }
             @Override public boolean onSingleTapConfirmed(MotionEvent e) { toggleControls(); return true; }
             @Override public boolean onDoubleTap(MotionEvent e) {
-                if (locked) return true;
+                if (locked || !gesturesEnabled) return true;
                 float third = root.getWidth() / 3f;
                 if (e.getX() >= third && e.getX() <= third * 2f) {
                     togglePlaybackFromGesture();
                 } else if (zoomScale > 1.01f) {
                     resetVideoZoom(true);
                 } else {
-                    jump(e.getX() < third ? -TEN_SECONDS : TEN_SECONDS);
+                    jump((e.getX() < third ? -1L : 1L)*gestureSeekSeconds*1000L);
                 }
                 return true;
             }
             @Override public void onLongPress(MotionEvent e) {
-                if (!locked && !dragging && zoomScale <= 1.01f && scaleDetector != null && !scaleDetector.isInProgress()) {
+                if (gesturesEnabled && !locked && !dragging && zoomScale <= 1.01f && scaleDetector != null && !scaleDetector.isInProgress()) {
                     startTemporaryDoubleSpeed();
                 }
             }
@@ -371,7 +416,9 @@ public class PlayerActivity extends AppCompatActivity {
         gestures.setOnTouchListener((v,e) -> gesture(e, detector));
         FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(-1,-1); gp.topMargin=dp(134); gp.bottomMargin=dp(118); root.addView(gestures,gp);
         makeTop();makeQuickTools();makeBottom();createFloatingWaveform();
-        lock = label("🔓", 17);GradientDrawable lockBackground=new GradientDrawable();lockBackground.setShape(GradientDrawable.OVAL);lockBackground.setColor(Color.TRANSPARENT);lock.setBackground(lockBackground);lock.setOnClickListener(v -> toggleLock());
+        lock = label("🔓", 17);GradientDrawable lockBackground=new GradientDrawable();lockBackground.setShape(GradientDrawable.OVAL);lockBackground.setColor(Color.TRANSPARENT);lock.setBackground(lockBackground);
+        lock.setOnClickListener(v -> {if(locked&&requireHoldToUnlock)Toast.makeText(this,"Hold the lock button to unlock",Toast.LENGTH_SHORT).show();else toggleLock();});
+        lock.setOnLongClickListener(v->{if(locked){toggleLock();Toast.makeText(this,"Controls unlocked",Toast.LENGTH_SHORT).show();return true;}return false;});
         lock.setOnTouchListener((view,event)->{int action=event.getActionMasked();if(action==MotionEvent.ACTION_DOWN)lockBackground.setColor(0x88111827);else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL)lockBackground.setColor(Color.TRANSPARENT);view.invalidate();return false;});
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(40),dp(40),Gravity.START|Gravity.BOTTOM); lp.leftMargin=dp(10); lp.bottomMargin=dp(13); root.addView(lock,lp);
         screenshotButton = topCircle("📷", 23);
@@ -398,7 +445,7 @@ public class PlayerActivity extends AppCompatActivity {
         addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("⊕\nPINCH",v->zoomMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());
         rotationLockControl=addQuick(orientationLocked?"ROTATION\nLOCKED":"ROTATION\nLOCK",null);rotationLockControl.setOnClickListener(v->toggleOrientationLock(rotationLockControl));
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
-        addQuick("WAVE\nFORM",v->analyzeWaveform());addQuick("PREVIEW\nSHEET",v->createPreviewSheet());
+        addQuick("WAVE\nFORM",v->analyzeWaveform());addQuick("PREVIEW\nSHEET",v->createPreviewSheet());addQuick("AUDIO\nONLY",v->toggleAudioOnly());
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
     }
     private TextView addQuick(String text,View.OnClickListener click){TextView v=label(text,9);v.setLines(2);v.setBackgroundColor(Color.TRANSPARENT);v.setOnTouchListener((view,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});if(click!=null)v.setOnClickListener(click);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(58),dp(58));p.setMargins(dp(4),0,dp(4),0);quickTools.addView(v,p);return v;}
@@ -527,7 +574,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private boolean gesture(MotionEvent e, GestureDetector detector) {
-        scaleDetector.onTouchEvent(e);if(locked){detector.onTouchEvent(e);return true;}
+        scaleDetector.onTouchEvent(e);if(locked){detector.onTouchEvent(e);return true;}if(!gesturesEnabled){detector.onTouchEvent(e);return true;}
         if(e.getPointerCount()>1||scaleDetector.isInProgress()){
             if(e.getActionMasked()==MotionEvent.ACTION_POINTER_DOWN){lastPanTouchX=e.getX(0);lastPanTouchY=e.getY(0);}return true;
         }
@@ -601,8 +648,8 @@ public class PlayerActivity extends AppCompatActivity {
     private void startTemporaryDoubleSpeed(){
         if(player==null||temporaryDoubleSpeed)return;
         temporaryDoubleSpeed=true;
-        player.setRate(2f);
-        hint.setText("2× speed");
+        player.setRate(holdSpeed);
+        hint.setText((holdSpeed==Math.round(holdSpeed)?String.valueOf((int)holdSpeed):String.valueOf(holdSpeed))+"× speed");
         hint.setVisibility(View.VISIBLE);
         handler.removeCallbacks(hideControlsAfterDelay);
     }
@@ -613,9 +660,9 @@ public class PlayerActivity extends AppCompatActivity {
         scheduleControlsHide();
     }
     private void speedMenu(TextView anchor){android.view.ContextThemeWrapper popupContext=new android.view.ContextThemeWrapper(this,R.style.NicePlayerPopupTheme);
-        PopupMenu m=new PopupMenu(popupContext,anchor);float[] s={.25f,.5f,.75f,1f,1.25f,1.5f,2f};for(int i=0;i<s.length;i++)m.getMenu().add(0,i,i,s[i]+"×");m.setOnMenuItemClickListener(x->{float n=s[x.getItemId()];selectedRate=n;preferences.edit().putFloat("playback_rate",n).apply();player.setRate(n);anchor.setText(n==1f?"1×":n+"×");return true;});m.show();}
+        PopupMenu m=new PopupMenu(popupContext,anchor);float[] s={.25f,.5f,.75f,1f,1.25f,1.5f,2f};for(int i=0;i<s.length;i++)m.getMenu().add(0,i,i,s[i]+"×");m.setOnMenuItemClickListener(x->{float n=s[x.getItemId()];selectedRate=n;preferences.edit().putFloat("playback_rate",n).putFloat(videoKey("rate"),n).apply();player.setRate(n);anchor.setText(n==1f?"1×":n+"×");return true;});m.show();}
     private int ratioMode;
-    private void ratio(TextView v){ratioMode=(ratioMode+1)%3;preferences.edit().putInt("ratio_mode",ratioMode).apply();applyStoredRatio();v.setText(ratioMode==0?"FIT":ratioMode==1?"16:9":"ZOOM");}
+    private void ratio(TextView v){ratioMode=(ratioMode+1)%3;preferences.edit().putInt("ratio_mode",ratioMode).putInt(videoKey("ratio"),ratioMode).apply();applyStoredRatio();v.setText(ratioMode==0?"FIT":ratioMode==1?"16:9":"ZOOM");}
     private void applyStoredRatio(){if(ratioMode==0){player.setAspectRatio(null);player.setScale(0);}else if(ratioMode==1){player.setAspectRatio("16:9");player.setScale(0);}else{player.setAspectRatio(null);player.setScale(1.35f);}}
     private void toggleControls(){
         if(locked){
@@ -665,8 +712,11 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,16,14,"Subtitle appearance");
         m.getMenu().add(0,17,15,"Playlist");
         m.getMenu().add(0,18,16,"Audio waveform: "+(waveformEnabled?"On":"Off"));
-        if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,17,"Picture in picture");m.getMenu().add(0,15,18,"Auto pop-up: "+(autoPip?"On":"Off"));}
-        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:audioSyncMenu();break;case 19:subtitleSyncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;}return true;});m.show();
+        m.getMenu().add(0,20,17,"Gesture settings");
+        m.getMenu().add(0,21,18,"Subtitle position & encoding");
+        m.getMenu().add(0,22,19,"Audio-only mode: "+(audioOnly?"On":"Off"));
+        if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,20,"Picture in picture");m.getMenu().add(0,15,21,"Auto pop-up: "+(autoPip?"On":"Off"));}
+        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:audioSyncMenu();break;case 19:subtitleSyncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;case 20:gestureSettingsMenu();break;case 21:subtitleAdvancedMenu();break;case 22:toggleAudioOnly();break;}return true;});m.show();
     }
     private void analyzeWaveform(){
         waveformEnabled=!waveformEnabled;
@@ -816,11 +866,11 @@ public class PlayerActivity extends AppCompatActivity {
     private void stepFrame(){if(player.isPlaying())player.pause();player.setTime(Math.max(0,player.getTime()+40));}
     private void audioSyncMenu(){
         String[] items={"− 50 ms","+ 50 ms","Reset to 0 ms"};
-        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Audio sync · "+signedMs(audioDelay)).setItems(items,(d,n)->{if(n==0)audioDelay-=50000;else if(n==1)audioDelay+=50000;else audioDelay=0;player.setAudioDelay(audioDelay);Toast.makeText(this,"Audio sync "+signedMs(audioDelay),Toast.LENGTH_SHORT).show();}).show();
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Audio sync · "+signedMs(audioDelay)).setItems(items,(d,n)->{if(n==0)audioDelay-=50000;else if(n==1)audioDelay+=50000;else audioDelay=0;player.setAudioDelay(audioDelay);preferences.edit().putLong(videoKey("audio_delay"),audioDelay).apply();Toast.makeText(this,"Audio sync "+signedMs(audioDelay),Toast.LENGTH_SHORT).show();}).show();
     }
     private void subtitleSyncMenu(){
         String[] items={"− 50 ms","+ 50 ms","Reset to 0 ms"};
-        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Subtitle sync · "+signedMs(subtitleDelay)).setItems(items,(d,n)->{if(n==0)subtitleDelay-=50000;else if(n==1)subtitleDelay+=50000;else subtitleDelay=0;player.setSpuDelay(subtitleDelay);Toast.makeText(this,"Subtitle sync "+signedMs(subtitleDelay),Toast.LENGTH_SHORT).show();}).show();
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Subtitle sync · "+signedMs(subtitleDelay)).setItems(items,(d,n)->{if(n==0)subtitleDelay-=50000;else if(n==1)subtitleDelay+=50000;else subtitleDelay=0;player.setSpuDelay(subtitleDelay);preferences.edit().putLong(videoKey("subtitle_delay"),subtitleDelay).apply();Toast.makeText(this,"Subtitle sync "+signedMs(subtitleDelay),Toast.LENGTH_SHORT).show();}).show();
     }
     private String signedMs(long microseconds){long milliseconds=microseconds/1000;return (milliseconds>0?"+":"")+milliseconds+" ms";}
     private void abRepeatMenu(){String[] items={pointA<0?"Set point A":"Reset point A ("+clock(pointA)+")",pointA>=0?"Set point B":"Set point A first","Clear A–B repeat"};new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("A–B repeat").setItems(items,(d,n)->{if(n==0){pointA=player.getTime();pointB=-1;Toast.makeText(this,"Point A: "+clock(pointA),Toast.LENGTH_SHORT).show();}else if(n==1&&pointA>=0){pointB=player.getTime();if(pointB<=pointA){pointA=pointB;pointB=-1;Toast.makeText(this,"Point A moved. Now set point B",Toast.LENGTH_SHORT).show();}else Toast.makeText(this,"A–B repeat active",Toast.LENGTH_SHORT).show();}else if(n==2){pointA=pointB=-1;Toast.makeText(this,"A–B repeat cleared",Toast.LENGTH_SHORT).show();}}).show();}
@@ -831,8 +881,16 @@ public class PlayerActivity extends AppCompatActivity {
         String[] names=new String[tracks.length];for(int i=0;i<tracks.length;i++)names[i]=tracks[i].name;
         new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Audio track").setItems(names,(d,n)->player.setAudioTrack(tracks[n].id)).show();
     }
-    private void subtitleStyleMenu(){String[] styles={"Default white","Small white","Large yellow","Extra large + raised"};new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Subtitle appearance").setSingleChoiceItems(styles,subtitleStyle,(d,n)->{subtitleStyle=n;preferences.edit().putInt("subtitle_style",n).apply();pendingSeek=Math.max(0,player.getTime());player.stop();startPlayback(true);d.dismiss();}).show();}
-    private void playlistMenu(){String[] names=new String[playlistUris.size()];for(int i=0;i<names.length;i++)names[i]=i<playlistTitles.size()?playlistTitles.get(i):"Video "+(i+1);new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Playlist").setSingleChoiceItems(names,playlistIndex,(d,n)->{playAt(n);d.dismiss();}).show();}
+    private void subtitleStyleMenu(){String[] styles={"Default white","Small white","Large yellow","Extra large + raised"};new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Subtitle appearance").setSingleChoiceItems(styles,subtitleStyle,(d,n)->{subtitleStyle=n;preferences.edit().putInt("subtitle_style",n).putInt(videoKey("subtitle_style"),n).apply();restartAtCurrentPosition();d.dismiss();}).show();}
+    private void gestureSettingsMenu(){String[] items={"Gestures: "+(gesturesEnabled?"On":"Off"),"Double-tap seek: "+gestureSeekSeconds+" seconds","Hold speed: "+holdSpeed+"×","Hold lock button to unlock: "+(requireHoldToUnlock?"On":"Off")};new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Gesture settings").setItems(items,(d,n)->{if(n==0)gesturesEnabled=!gesturesEnabled;else if(n==1){int[] values={5,10,15,30};int at=0;for(int i=0;i<values.length;i++)if(values[i]==gestureSeekSeconds)at=i;gestureSeekSeconds=values[(at+1)%values.length];}else if(n==2){float[] values={1.5f,2f,3f};int at=0;for(int i=0;i<values.length;i++)if(values[i]==holdSpeed)at=i;holdSpeed=values[(at+1)%values.length];}else requireHoldToUnlock=!requireHoldToUnlock;preferences.edit().putBoolean("gestures_enabled",gesturesEnabled).putInt("gesture_seek_seconds",gestureSeekSeconds).putFloat("hold_speed",holdSpeed).putBoolean("hold_to_unlock",requireHoldToUnlock).apply();gestureSettingsMenu();}).show();}
+    private void subtitleAdvancedMenu(){String[] encodings={"Auto / UTF-8","UTF-8","Windows-1252","ISO-8859-1","Arabic CP1256"};String[] items={"Position: "+(subtitlePosition==0?"Default":subtitlePosition+" px"),"Encoding: "+encodings[Math.max(0,Math.min(subtitleEncoding,encodings.length-1))]};new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Subtitle controls").setItems(items,(d,n)->{if(n==0){int[] positions={0,40,80,120};int at=0;for(int i=0;i<positions.length;i++)if(positions[i]==subtitlePosition)at=i;subtitlePosition=positions[(at+1)%positions.length];}else subtitleEncoding=(subtitleEncoding+1)%encodings.length;preferences.edit().putInt(videoKey("subtitle_position"),subtitlePosition).putInt(videoKey("subtitle_encoding"),subtitleEncoding).apply();restartAtCurrentPosition();}).show();}
+    private void restartAtCurrentPosition(){pendingSeek=Math.max(0,player.getTime());player.stop();softwareRetryAttempted=false;startPlayback(true);}
+    private void toggleAudioOnly(){audioOnly=!audioOnly;applyAudioOnly();Toast.makeText(this,audioOnly?"Audio-only mode on":"Video restored",Toast.LENGTH_SHORT).show();}
+    private void applyAudioOnly(){if(video!=null)video.setVisibility(audioOnly?View.INVISIBLE:View.VISIBLE);}
+    private void playlistMenu(){ArrayList<String> choices=new ArrayList<>();choices.add("Repeat: "+(repeatMode==0?"Off":repeatMode==1?"One":"All"));choices.add("Shuffle: "+(shuffleEnabled?"On":"Off"));choices.add("Move current up");choices.add("Move current down");choices.add("Choose next video");new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Playlist controls").setItems(choices.toArray(new String[0]),(d,n)->{if(n==0){repeatMode=(repeatMode+1)%3;preferences.edit().putInt("playlist_repeat_mode",repeatMode).apply();playlistMenu();}else if(n==1){shuffleEnabled=!shuffleEnabled;preferences.edit().putBoolean("playlist_shuffle",shuffleEnabled).apply();playlistMenu();}else if(n==2)movePlaylistItem(-1);else if(n==3)movePlaylistItem(1);else choosePlaylistVideo();}).show();}
+    private void movePlaylistItem(int direction){int target=playlistIndex+direction;if(target<0||target>=playlistUris.size()){Toast.makeText(this,"Cannot move further",Toast.LENGTH_SHORT).show();return;}Collections.swap(playlistUris,playlistIndex,target);if(playlistIndex<playlistTitles.size()&&target<playlistTitles.size())Collections.swap(playlistTitles,playlistIndex,target);playlistIndex=target;Toast.makeText(this,"Playlist reordered",Toast.LENGTH_SHORT).show();}
+    private void choosePlaylistVideo(){String[] names=new String[playlistUris.size()];for(int i=0;i<names.length;i++)names[i]=i<playlistTitles.size()?playlistTitles.get(i):"Video "+(i+1);new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Choose video").setSingleChoiceItems(names,playlistIndex,(d,n)->{playAt(n);d.dismiss();}).show();}
+    private void playNextForMode(){if(repeatMode==1){player.setTime(0);player.play();return;}if(shuffleEnabled&&playlistUris.size()>1){int next=playlistIndex;while(next==playlistIndex)next=new Random().nextInt(playlistUris.size());playAt(next);return;}if(playlistIndex+1<playlistUris.size())playAt(playlistIndex+1);else if(repeatMode==2)playAt(0);else Toast.makeText(this,"Playlist finished",Toast.LENGTH_SHORT).show();}
     private void subtitleTracks(){
         MediaPlayer.TrackDescription[] tracks=player.getSpuTracks();
         int count=tracks==null?0:tracks.length;String[] names=new String[count+1];names[0]="Off";
@@ -909,7 +967,8 @@ public class PlayerActivity extends AppCompatActivity {
     private String formatBytes(long bytes){if(bytes<0)return "Unknown";if(bytes<1024)return bytes+" B";double value=bytes;String[] units={"B","KB","MB","GB"};int unit=0;while(value>=1024&&unit<units.length-1){value/=1024;unit++;}return String.format(Locale.US,"%.1f %s",value,units[unit]);}
     private TextView label(String s,int size){TextView v=new TextView(this);v.setText(s==null?"":s);v.setTextColor(Color.WHITE);v.setTextSize(size);v.setGravity(Gravity.CENTER);v.setPadding(dp(3),0,dp(3),0);return v;}
     private String clock(long ms){long t=Math.max(0,ms/1000),h=t/3600,m=(t%3600)/60,s=t%60;return h>0?String.format(Locale.US,"%d:%02d:%02d",h,m,s):String.format(Locale.US,"%02d:%02d",m,s);}
-    private void rotate(){int o=getResources().getConfiguration().orientation;setRequestedOrientation(o==android.content.res.Configuration.ORIENTATION_LANDSCAPE?ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);}
+    private void rotate(){int o=getResources().getConfiguration().orientation;int target=o==android.content.res.Configuration.ORIENTATION_LANDSCAPE?android.content.res.Configuration.ORIENTATION_PORTRAIT:android.content.res.Configuration.ORIENTATION_LANDSCAPE;preferences.edit().putInt(videoKey("orientation"),target).apply();setRequestedOrientation(target==android.content.res.Configuration.ORIENTATION_PORTRAIT?ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);}
+    private void applyRememberedOrientation(){int saved=preferences.getInt(videoKey("orientation"),0);if(saved==android.content.res.Configuration.ORIENTATION_LANDSCAPE)setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);else if(saved==android.content.res.Configuration.ORIENTATION_PORTRAIT)setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT);}
     private void toggleOrientationLock(TextView control){
         orientationLocked=!orientationLocked;
         preferences.edit().putBoolean("orientation_locked",orientationLocked).apply();

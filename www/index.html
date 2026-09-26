@@ -151,6 +151,9 @@
         .video-thumb { position:relative; width:112px; height:68px; flex:none; display:grid; place-items:center; overflow:hidden; border-radius:10px; color:#67e8f9; background:linear-gradient(145deg,#172554,#312e81); }
         .video-thumb img { width:100%; height:100%; object-fit:cover; }
         .thumb-duration { position:absolute; right:4px; bottom:4px; padding:2px 5px; border-radius:4px; background:rgba(0,0,0,.82); color:#fff; font-size:9px; font-weight:700; }
+        .watch-progress { position:absolute; left:0; right:0; bottom:0; height:3px; background:rgba(255,255,255,.22); }
+        .watch-progress span { display:block; height:100%; background:#22d3ee; }
+        .watched-badge { position:absolute; left:5px; top:5px; padding:2px 5px; border-radius:5px; background:rgba(5,150,105,.9); color:#fff; font-size:9px; font-weight:800; }
         .thumb-new { position:absolute; z-index:2; right:4px; top:4px; padding:3px 7px; border-radius:999px; background:linear-gradient(135deg,#22d3ee,#0284c7); color:#fff; box-shadow:0 2px 9px rgba(34,211,238,.38); font-size:8px; font-weight:900; letter-spacing:.7px; }
         .video-info { flex:1; min-width:0; }
         .video-name { font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -416,7 +419,7 @@
         const deviceVideoList = document.getElementById('deviceVideoList');
         const libraryEmpty = document.getElementById('libraryEmpty');
         let deviceFolders = [], visibleDeviceVideos = [], hiddenFolderGroups = [], currentFolder = null, currentFolderIsHidden = false, showHiddenOnly = false;
-        let libraryView = localStorage.getItem('library_view') || 'detailed';
+        let libraryView = localStorage.getItem('library_view') || 'detailed', watchedOnly = false;
 
         function storedList(key){try{const value=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(value)?value:[];}catch(error){return [];}}
         function hiddenWords(){return storedList('hidden_words').map(word=>String(word).trim().toLowerCase()).filter(Boolean);}
@@ -571,7 +574,7 @@
             deviceVideoList.innerHTML = '';
             const hiddenUris=new Set(videos.filter(videoIsHidden).map(video=>video.uri));
             if(hiddenUris.size)localStorage.setItem('played_video_uris',JSON.stringify(playedVideoUris().filter(uri=>!hiddenUris.has(uri))));
-            videos=videos.filter(video=>showHiddenOnly?videoIsHidden(video):!videoIsHidden(video));
+            videos=videos.filter(video=>showHiddenOnly?videoIsHidden(video):!videoIsHidden(video)).filter(video=>!watchedOnly||video.watched);
             document.getElementById('sectionNote').innerText = videos.length + ' items';
             libraryEmpty.style.display=videos.length?'none':'block';libraryEmpty.innerText=showHiddenOnly?'No hidden videos.':'No visible videos in this folder.';
             const duplicateCount={};videos.forEach(v=>{const key=v.name+'|'+v.size;duplicateCount[key]=(duplicateCount[key]||0)+1;});
@@ -580,6 +583,8 @@
                 const thumb = document.createElement('div'); thumb.className = 'video-thumb';
                 thumb.textContent = '▶';
                 if (item.duration) { const badge = document.createElement('span'); badge.className = 'thumb-duration'; badge.textContent = formatTime(item.duration / 1000); thumb.appendChild(badge); }
+                if(item.watched){const badge=document.createElement('span');badge.className='watched-badge';badge.textContent='WATCHED';thumb.appendChild(badge);}
+                else if(Number(item.progress)>0){const progress=document.createElement('div');progress.className='watch-progress';progress.innerHTML='<span></span>';progress.firstChild.style.width=Math.round(Number(item.progress)*100)+'%';thumb.appendChild(progress);}
                 if (isNewDownloadedVideo(item)) { const badge = document.createElement('span'); badge.className = 'thumb-new'; badge.textContent = 'NEW'; thumb.appendChild(badge); }
                 const info = document.createElement('div'); info.className = 'video-info';
                 const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
@@ -620,10 +625,11 @@
             const shade=document.createElement('div');shade.className='action-shade';
             const parent=kind==='video'&&item.bucketId?deviceFolders.find(folder=>folder.bucketId===item.bucketId):null,parentHidden=!!(parent&&isHidden('folder',parent));
             const hidden=kind==='video'?videoIsHidden(item):isHidden(kind,item);
-            const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><button data-action="rename">Rename</button><button data-action="hide">'+(parentHidden?'Unhide folder':hidden?'Unhide':'Hide')+'</button><button class="danger" data-action="delete">Delete</button><button data-action="cancel">Cancel</button>';
+            const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><button data-action="rename">Rename</button>'+(kind==='video'?'<button data-action="watched">'+(item.watched?'Mark as unwatched':'Mark as watched')+'</button>':'')+'<button data-action="hide">'+(parentHidden?'Unhide folder':hidden?'Unhide':'Hide')+'</button><button class="danger" data-action="delete">Delete</button><button data-action="cancel">Cancel</button>';
             sheet.querySelector('.action-title').textContent=item.name;shade.appendChild(sheet);document.body.appendChild(shade);
             shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')shade.remove();});
             sheet.querySelector('[data-action="rename"]').onclick=()=>{shade.remove();renameMedia(kind,item);};
+            const watchedButton=sheet.querySelector('[data-action="watched"]');if(watchedButton)watchedButton.onclick=async()=>{shade.remove();const plugin=videoLibraryPlugin();if(plugin&&plugin.setWatched){await plugin.setWatched({uri:item.uri,watched:!item.watched});item.watched=!item.watched;item.progress=0;renderVideoRows(visibleDeviceVideos);}};
             const hideButton=sheet.querySelector('[data-action="hide"]'),dotLocked=!!(item.dotHidden||(parent&&parent.dotHidden));
             if(dotLocked){hideButton.textContent='Dot folder · always hidden';hideButton.disabled=true;hideButton.style.opacity='.55';}
             else hideButton.onclick=()=>{shade.remove();toggleMediaHidden(parentHidden?'folder':kind,parentHidden?parent:item);};
@@ -640,9 +646,10 @@
         function openViewMenu(){
             const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';
             const historyHidden=localStorage.getItem('history_hidden')==='1';
-            sheet.innerHTML='<div class="action-title">View</div><button data-view="detailed">▤  Detailed</button><button data-view="compact">☷  Compact</button><button data-view="grid">▦  Grid</button><button data-view="hidden">◧  Hidden items</button><button data-action="words">Aa  Hidden words</button><button data-action="history">◷  '+(historyHidden?'Show watch history':'Hide watch history')+'</button><button data-action="cancel">Cancel</button>';shade.appendChild(sheet);document.body.appendChild(shade);
+            sheet.innerHTML='<div class="action-title">View</div><button data-view="detailed">▤  Detailed</button><button data-view="compact">☷  Compact</button><button data-view="grid">▦  Grid</button><button data-view="hidden">◧  Hidden items</button><button data-action="watched">✓  '+(watchedOnly?'Show all videos':'Watched only')+'</button><button data-action="words">Aa  Hidden words</button><button data-action="history">◷  '+(historyHidden?'Show watch history':'Hide watch history')+'</button><button data-action="cancel">Cancel</button>';shade.appendChild(sheet);document.body.appendChild(shade);
             sheet.querySelectorAll('[data-view]').forEach(button=>button.onclick=()=>{shade.remove();setLibraryView(button.dataset.view);});shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')shade.remove();});
             sheet.querySelector('[data-action="history"]').onclick=()=>{localStorage.setItem('history_hidden',historyHidden?'0':'1');shade.remove();loadPlaybackHistory();};
+            sheet.querySelector('[data-action="watched"]').onclick=()=>{watchedOnly=!watchedOnly;shade.remove();if(visibleDeviceVideos.length)renderVideoRows(visibleDeviceVideos);};
             sheet.querySelector('[data-action="words"]').onclick=()=>{shade.remove();editHiddenWords();};
         }
         function editHiddenWords(){
