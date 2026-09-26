@@ -81,6 +81,7 @@ public class PlayerActivity extends AppCompatActivity {
     private float[] equalizerGains;
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
     private boolean waveformEnabled, pipTransitionPending;
+    private boolean temporaryDoubleSpeed;
     private boolean screenshotInProgress;
     private long screenshotPlaybackPosition = -1;
     private boolean screenshotWasPlaying;
@@ -338,8 +339,25 @@ public class PlayerActivity extends AppCompatActivity {
         FrameLayout.LayoutParams levelParams=new FrameLayout.LayoutParams(dp(34),dp(200),Gravity.START|Gravity.CENTER_VERTICAL);levelParams.leftMargin=dp(28);root.addView(gestureLevel,levelParams);
 
         GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
             @Override public boolean onSingleTapConfirmed(MotionEvent e) { toggleControls(); return true; }
-            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked){if(zoomScale>1.01f)resetVideoZoom(true);else jump(e.getX() < root.getWidth()/2f ? -TEN_SECONDS : TEN_SECONDS);} return true; }
+            @Override public boolean onDoubleTap(MotionEvent e) {
+                if (locked) return true;
+                float third = root.getWidth() / 3f;
+                if (e.getX() >= third && e.getX() <= third * 2f) {
+                    togglePlaybackFromGesture();
+                } else if (zoomScale > 1.01f) {
+                    resetVideoZoom(true);
+                } else {
+                    jump(e.getX() < third ? -TEN_SECONDS : TEN_SECONDS);
+                }
+                return true;
+            }
+            @Override public void onLongPress(MotionEvent e) {
+                if (!locked && !dragging && zoomScale <= 1.01f && scaleDetector != null && !scaleDetector.isInProgress()) {
+                    startTemporaryDoubleSpeed();
+                }
+            }
         });
         scaleDetector=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
             @Override public boolean onScale(ScaleGestureDetector d){
@@ -380,6 +398,7 @@ public class PlayerActivity extends AppCompatActivity {
         addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("⊕\nPINCH",v->zoomMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());
         rotationLockControl=addQuick(orientationLocked?"ROTATION\nLOCKED":"ROTATION\nLOCK",null);rotationLockControl.setOnClickListener(v->toggleOrientationLock(rotationLockControl));
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
+        addQuick("WAVE\nFORM",v->analyzeWaveform());addQuick("PREVIEW\nSHEET",v->createPreviewSheet());
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
     }
     private TextView addQuick(String text,View.OnClickListener click){TextView v=label(text,9);v.setLines(2);v.setBackgroundColor(Color.TRANSPARENT);v.setOnTouchListener((view,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});if(click!=null)v.setOnClickListener(click);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(58),dp(58));p.setMargins(dp(4),0,dp(4),0);quickTools.addView(v,p);return v;}
@@ -540,7 +559,10 @@ public class PlayerActivity extends AppCompatActivity {
                 hint.setVisibility(View.VISIBLE);
             }
         }
-        else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){hint.setVisibility(View.GONE);if(gestureLevel!=null)gestureLevel.setVisibility(View.GONE);dragging=false;}
+        else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){
+            stopTemporaryDoubleSpeed();
+            hint.setVisibility(View.GONE);if(gestureLevel!=null)gestureLevel.setVisibility(View.GONE);dragging=false;
+        }
         return true;
     }
 
@@ -569,6 +591,27 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void jump(long amount){long len=Math.max(0,player.getLength());player.setTime(Math.max(0,Math.min(len,player.getTime()+amount)));hint.setText(amount>0?"+10 seconds":"−10 seconds");hint.setVisibility(View.VISIBLE);handler.postDelayed(()->hint.setVisibility(View.GONE),550);}
+    private void togglePlaybackFromGesture(){
+        if(player==null)return;
+        if(player.isPlaying()){player.pause();hint.setText("Paused");}
+        else{player.play();hint.setText("Playing");}
+        hint.setVisibility(View.VISIBLE);
+        handler.postDelayed(()->hint.setVisibility(View.GONE),550);
+    }
+    private void startTemporaryDoubleSpeed(){
+        if(player==null||temporaryDoubleSpeed)return;
+        temporaryDoubleSpeed=true;
+        player.setRate(2f);
+        hint.setText("2× speed");
+        hint.setVisibility(View.VISIBLE);
+        handler.removeCallbacks(hideControlsAfterDelay);
+    }
+    private void stopTemporaryDoubleSpeed(){
+        if(!temporaryDoubleSpeed)return;
+        temporaryDoubleSpeed=false;
+        if(player!=null)player.setRate(selectedRate);
+        scheduleControlsHide();
+    }
     private void speedMenu(TextView anchor){android.view.ContextThemeWrapper popupContext=new android.view.ContextThemeWrapper(this,R.style.NicePlayerPopupTheme);
         PopupMenu m=new PopupMenu(popupContext,anchor);float[] s={.25f,.5f,.75f,1f,1.25f,1.5f,2f};for(int i=0;i<s.length;i++)m.getMenu().add(0,i,i,s[i]+"×");m.setOnMenuItemClickListener(x->{float n=s[x.getItemId()];selectedRate=n;preferences.edit().putFloat("playback_rate",n).apply();player.setRate(n);anchor.setText(n==1f?"1×":n+"×");return true;});m.show();}
     private int ratioMode;
