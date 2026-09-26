@@ -184,7 +184,7 @@ public class PlayerActivity extends AppCompatActivity {
         player.attachViews(video, null, false, false);
         player.setEventListener(e -> runOnUiThread(() -> {
             if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
-            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();applyAudioOnly();startPlaybackService();scheduleControlsHide(); }
+            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);player.setAudioDelay(audioDelay);player.setSpuDelay(subtitleDelay);applyStoredRatio();applyAudioCleanup();applySafeStart();applyAudioOnly();startPlaybackService();scheduleControlsHide(); }
             else if (e.type == MediaPlayer.Event.Paused) showControls(false);
             else if (e.type == MediaPlayer.Event.EndReached) {
                 if (player.getLength() <= 0 || player.getTime() < 1000) handlePlaybackError();
@@ -314,10 +314,12 @@ public class PlayerActivity extends AppCompatActivity {
         long length = player.getLength();
         if (saved > 5000 && (length <= 0 || saved < length - 10000)) {
             positionRestoredForItem=true;
+            player.pause();
             new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Resume playback?")
                     .setMessage("Continue from "+clock(saved)+" or start from the beginning.")
-                    .setPositiveButton("Resume",(d,n)->player.setTime(saved))
-                    .setNegativeButton("Start over",(d,n)->{preferences.edit().remove(positionKey()).apply();player.setTime(0);}).show();
+                    .setCancelable(false)
+                    .setPositiveButton("Resume",(d,n)->{player.setTime(saved);player.play();})
+                    .setNegativeButton("Start over",(d,n)->{preferences.edit().remove(positionKey()).apply();player.setTime(0);player.play();}).show();
         }
     }
 
