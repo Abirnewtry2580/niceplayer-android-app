@@ -104,7 +104,13 @@ public class PlayerActivity extends AppCompatActivity {
     private final BroadcastReceiver noisyReceiver = new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){if(AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())&&player!=null&&player.isPlaying()){player.pause();Toast.makeText(PlayerActivity.this,"Playback paused: headphones disconnected",Toast.LENGTH_LONG).show();}}};
     private final BroadcastReceiver playbackReceiver=new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){if(player==null)return;String a=intent.getAction();if(PlaybackService.PLAY_PAUSE.equals(a)){if(player.isPlaying())player.pause();else player.play();}else if(PlaybackService.PREVIOUS.equals(a))playAt(playlistIndex-1);else if(PlaybackService.NEXT.equals(a))playAt(playlistIndex+1);}};
     private long downTime;
+    private float holdDownX, holdDownY;
+    private boolean globalHoldPending;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable globalHoldAction = () -> {
+        globalHoldPending=false;
+        if(gesturesEnabled&&!locked&&!dragging)startTemporaryDoubleSpeed();
+    };
     private final Runnable hideLockButton = () -> {
         if (locked && lock != null) lock.setVisibility(View.GONE);
     };
@@ -595,7 +601,7 @@ public class PlayerActivity extends AppCompatActivity {
         else if(e.getActionMasked()==MotionEvent.ACTION_MOVE){
             float dx=e.getX()-downX,dy=e.getY()-downY;
             if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>dp(20)){
-                dragging=true;long len=player.getLength();if(len>0){long delta=(long)(dx/root.getWidth()*len),target=Math.max(0,Math.min(len,downTime+delta));player.setTime(target);hint.setText((delta>=0?"+ ":"− ")+clock(Math.abs(delta))+"   "+clock(target));hint.setVisibility(View.VISIBLE);}
+                dragging=true;long len=player.getLength();if(len>0){long rawDelta=(long)(dx/root.getWidth()*len),delta=Math.max(-60000L,Math.min(60000L,rawDelta)),target=Math.max(0,Math.min(len,downTime+delta));player.setTime(target);hint.setText((delta>=0?"+ ":"− ")+clock(Math.abs(delta))+"   "+clock(target));hint.setVisibility(View.VISIBLE);}
             } else if(Math.abs(dy)>dp(20)) {
                 dragging=true; float change=-dy/root.getHeight();
                 if(downX<root.getWidth()/2f){
@@ -642,17 +648,12 @@ public class PlayerActivity extends AppCompatActivity {
     private void jump(long amount){long len=Math.max(0,player.getLength());player.setTime(Math.max(0,Math.min(len,player.getTime()+amount)));long seconds=Math.max(1,Math.abs(amount)/1000);hint.setText((amount>0?"+":"−")+seconds+" seconds");hint.setVisibility(View.VISIBLE);handler.postDelayed(()->hint.setVisibility(View.GONE),550);}
     private void togglePlaybackFromGesture(){
         if(player==null)return;
-        if(player.isPlaying()){player.pause();hint.setText("Paused");}
-        else{player.play();hint.setText("Playing");}
-        hint.setVisibility(View.VISIBLE);
-        handler.postDelayed(()->hint.setVisibility(View.GONE),550);
+        if(player.isPlaying())player.pause();else player.play();
     }
     private void startTemporaryDoubleSpeed(){
         if(player==null||temporaryDoubleSpeed)return;
         temporaryDoubleSpeed=true;
         player.setRate(holdSpeed);
-        hint.setText((holdSpeed==Math.round(holdSpeed)?String.valueOf((int)holdSpeed):String.valueOf(holdSpeed))+"× speed");
-        hint.setVisibility(View.VISIBLE);
         handler.removeCallbacks(hideControlsAfterDelay);
     }
     private void stopTemporaryDoubleSpeed(){
@@ -661,6 +662,24 @@ public class PlayerActivity extends AppCompatActivity {
         if(player!=null)player.setRate(selectedRate);
         scheduleControlsHide();
     }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event){
+        int action=event.getActionMasked();
+        if(action==MotionEvent.ACTION_DOWN){
+            holdDownX=event.getRawX();holdDownY=event.getRawY();globalHoldPending=gesturesEnabled&&!locked;
+            handler.removeCallbacks(globalHoldAction);
+            if(globalHoldPending)handler.postDelayed(globalHoldAction,android.view.ViewConfiguration.getLongPressTimeout());
+        }else if(action==MotionEvent.ACTION_POINTER_DOWN||action==MotionEvent.ACTION_MOVE){
+            float dx=event.getRawX()-holdDownX,dy=event.getRawY()-holdDownY;
+            int slop=android.view.ViewConfiguration.get(this).getScaledTouchSlop();
+            if(event.getPointerCount()>1||dx*dx+dy*dy>slop*slop){globalHoldPending=false;handler.removeCallbacks(globalHoldAction);if(temporaryDoubleSpeed)stopTemporaryDoubleSpeed();}
+        }else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_CANCEL){
+            globalHoldPending=false;handler.removeCallbacks(globalHoldAction);
+            if(temporaryDoubleSpeed){MotionEvent cancel=MotionEvent.obtain(event);cancel.setAction(MotionEvent.ACTION_CANCEL);super.dispatchTouchEvent(cancel);cancel.recycle();stopTemporaryDoubleSpeed();return true;}
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
     private void speedMenu(TextView anchor){android.view.ContextThemeWrapper popupContext=new android.view.ContextThemeWrapper(this,R.style.NicePlayerPopupTheme);
         PopupMenu m=new PopupMenu(popupContext,anchor);float[] s={.25f,.5f,.75f,1f,1.25f,1.5f,2f};for(int i=0;i<s.length;i++)m.getMenu().add(0,i,i,s[i]+"×");m.setOnMenuItemClickListener(x->{float n=s[x.getItemId()];selectedRate=n;preferences.edit().putFloat("playback_rate",n).putFloat(videoKey("rate"),n).apply();player.setRate(n);anchor.setText(n==1f?"1×":n+"×");return true;});m.show();}
     private int ratioMode;
