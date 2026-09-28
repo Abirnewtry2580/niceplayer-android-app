@@ -91,6 +91,7 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean resumeAfterWaveform;
     private boolean surfaceRefreshPending;
     private boolean positionRestoredForItem;
+    private boolean playbackStartedForItem;
     private float selectedRate = 1f;
     private AudioFocusRequest focusRequest;
     private boolean audioFocusHeld;
@@ -172,10 +173,10 @@ public class PlayerActivity extends AppCompatActivity {
         player.attachViews(video, null, false, false);
         player.setEventListener(e -> runOnUiThread(() -> {
             if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
-            else if (e.type == MediaPlayer.Event.Playing) { restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService();scheduleControlsHide(); }
+            else if (e.type == MediaPlayer.Event.Playing) { playbackStartedForItem=true;restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService();scheduleControlsHide(); }
             else if (e.type == MediaPlayer.Event.Paused) showControls(false);
             else if (e.type == MediaPlayer.Event.EndReached) {
-                if (player.getLength() <= 0 || player.getTime() < 1000) handlePlaybackError();
+                if (!playbackStartedForItem) handlePlaybackError();
                 else playAt(playlistIndex + 1);
             }
         }));
@@ -326,6 +327,7 @@ public class PlayerActivity extends AppCompatActivity {
         orientationLocked=preferences.getBoolean(videoKey("orientation_locked"),false);
         disableWaveformForNewVideo();
         positionRestoredForItem=false;
+        playbackStartedForItem=false;
         softwareRetryAttempted = false;
         directUriRetryAttempted = false;
         title.setText(currentTitle());
