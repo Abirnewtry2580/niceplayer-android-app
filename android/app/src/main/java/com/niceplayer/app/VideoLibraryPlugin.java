@@ -215,7 +215,7 @@ public class VideoLibraryPlugin extends Plugin {
         android.content.SharedPreferences preferences=getContext().getSharedPreferences("playback",android.content.Context.MODE_PRIVATE);
         ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();
         for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri!=null&&!removed.contains(uri)){uris.add(uri);names.add(preferences.getString("history_name_"+i,"Video"));}}
-        android.content.SharedPreferences.Editor edit=preferences.edit();for(String uri:removed)edit.remove("position_"+uri);
+        android.content.SharedPreferences.Editor edit=preferences.edit();
         for(int i=0;i<12;i++){if(i<uris.size()){edit.putString("history_uri_"+i,uris.get(i));edit.putString("history_name_"+i,names.get(i));}else{edit.remove("history_uri_"+i);edit.remove("history_name_"+i);}}
         edit.apply();JSObject result=new JSObject();result.put("success",true);call.resolve(result);
     }
