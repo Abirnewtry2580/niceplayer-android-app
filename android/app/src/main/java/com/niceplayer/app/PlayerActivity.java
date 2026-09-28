@@ -93,6 +93,7 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean positionRestoredForItem;
     private float selectedRate = 1f;
     private AudioFocusRequest focusRequest;
+    private boolean audioFocusHeld;
     private final ActivityResultLauncher<String[]> subtitlePicker = registerForActivityResult(
             new ActivityResultContracts.OpenDocument(), this::attachExternalSubtitle);
     private final BroadcastReceiver noisyReceiver = new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){if(AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())&&player!=null&&player.isPlaying()){player.pause();Toast.makeText(PlayerActivity.this,"Playback paused: headphones disconnected",Toast.LENGTH_LONG).show();}}};
@@ -281,8 +282,11 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void requestAudioFocus(){
-        AudioManager.OnAudioFocusChangeListener listener=change->{if(player==null)return;if(change<=AudioManager.AUDIOFOCUS_LOSS_TRANSIENT){pausedByFocus=player.isPlaying();player.pause();}else if(change==AudioManager.AUDIOFOCUS_LOSS){pausedByFocus=false;player.pause();}else if(change==AudioManager.AUDIOFOCUS_GAIN&&pausedByFocus){pausedByFocus=false;player.play();}};
-        if(Build.VERSION.SDK_INT>=26){focusRequest=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build()).setOnAudioFocusChangeListener(listener).build();audioManager.requestAudioFocus(focusRequest);}else audioManager.requestAudioFocus(listener,AudioManager.STREAM_MUSIC,AudioManager.AUDIOFOCUS_GAIN);
+        if(audioFocusHeld)return;
+        AudioManager.OnAudioFocusChangeListener listener=change->{if(player==null)return;if(change==AudioManager.AUDIOFOCUS_LOSS){audioFocusHeld=false;pausedByFocus=false;player.pause();}else if(change<=AudioManager.AUDIOFOCUS_LOSS_TRANSIENT){pausedByFocus=player.isPlaying();player.pause();}else if(change==AudioManager.AUDIOFOCUS_GAIN&&pausedByFocus){audioFocusHeld=true;pausedByFocus=false;player.play();}};
+        int result;
+        if(Build.VERSION.SDK_INT>=26){focusRequest=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build()).setOnAudioFocusChangeListener(listener).build();result=audioManager.requestAudioFocus(focusRequest);}else result=audioManager.requestAudioFocus(listener,AudioManager.STREAM_MUSIC,AudioManager.AUDIOFOCUS_GAIN);
+        audioFocusHeld=result==AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
     }
     private void startPlaybackService(){Intent service=new Intent(this,PlaybackService.class).putExtra("title",currentTitle());if(Build.VERSION.SDK_INT>=26)startForegroundService(service);else startService(service);}
     private boolean headphonesActive(){for(AudioDeviceInfo d:audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)){int t=d.getType();if(t==AudioDeviceInfo.TYPE_WIRED_HEADPHONES||t==AudioDeviceInfo.TYPE_WIRED_HEADSET||t==AudioDeviceInfo.TYPE_USB_HEADSET||t==AudioDeviceInfo.TYPE_BLUETOOTH_A2DP||(Build.VERSION.SDK_INT>=31&&t==AudioDeviceInfo.TYPE_BLE_HEADSET))return true;}return false;}
@@ -327,8 +331,8 @@ public class PlayerActivity extends AppCompatActivity {
         title.setText(currentTitle());
         player.stop();
         resetVideoZoom(false);
-        startPlayback(true);
         applyVideoOrientation();
+        startPlayback(true);
         if(waveform!=null)waveform.clearAnalysis();
     }
 
