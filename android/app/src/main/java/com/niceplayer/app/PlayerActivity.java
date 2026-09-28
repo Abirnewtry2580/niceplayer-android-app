@@ -148,7 +148,7 @@ public class PlayerActivity extends AppCompatActivity {
         autoPip = preferences.getBoolean("auto_pip", true);
         // Waveform is scoped to the current video and always starts off.
         waveformEnabled = false;
-        orientationLocked = preferences.getBoolean("orientation_locked", false);
+        orientationLocked = preferences.getBoolean(videoKey("orientation_locked"), false);
         selectedRate = preferences.getFloat("playback_rate", 1f);
         ratioMode = preferences.getInt("ratio_mode", 0);
         audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
@@ -178,12 +178,12 @@ public class PlayerActivity extends AppCompatActivity {
                 else playAt(playlistIndex + 1);
             }
         }));
+        applyVideoOrientation();
         if (!startPlayback(true)) {
             Toast.makeText(this, "Could not open this video", Toast.LENGTH_LONG).show();
             finish();
             return;
         }
-        if(orientationLocked)applyOrientationLock();
         if(waveform!=null)waveform.clearAnalysis();
         if(waveformEnabled)handler.postDelayed(this::loadWaveform,500);
         handler.post(ticker);
@@ -265,6 +265,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private String positionKey() { return "position_" + sourceUri; }
+    private String videoKey(String setting) { return "video_" + setting + "_" + sourceUri; }
 
     private void restorePosition() {
         if(positionRestoredForItem)return;
@@ -318,6 +319,7 @@ public class PlayerActivity extends AppCompatActivity {
         savePosition();
         playlistIndex = index;
         sourceUri = Uri.parse(playlistUris.get(index));
+        orientationLocked=preferences.getBoolean(videoKey("orientation_locked"),false);
         disableWaveformForNewVideo();
         positionRestoredForItem=false;
         softwareRetryAttempted = false;
@@ -326,6 +328,7 @@ public class PlayerActivity extends AppCompatActivity {
         player.stop();
         resetVideoZoom(false);
         startPlayback(true);
+        applyVideoOrientation();
         if(waveform!=null)waveform.clearAnalysis();
     }
 
@@ -866,15 +869,36 @@ public class PlayerActivity extends AppCompatActivity {
     private String formatBytes(long bytes){if(bytes<0)return "Unknown";if(bytes<1024)return bytes+" B";double value=bytes;String[] units={"B","KB","MB","GB"};int unit=0;while(value>=1024&&unit<units.length-1){value/=1024;unit++;}return String.format(Locale.US,"%.1f %s",value,units[unit]);}
     private TextView label(String s,int size){TextView v=new TextView(this);v.setText(s==null?"":s);v.setTextColor(Color.WHITE);v.setTextSize(size);v.setGravity(Gravity.CENTER);v.setPadding(dp(3),0,dp(3),0);return v;}
     private String clock(long ms){long t=Math.max(0,ms/1000),h=t/3600,m=(t%3600)/60,s=t%60;return h>0?String.format(Locale.US,"%d:%02d:%02d",h,m,s):String.format(Locale.US,"%02d:%02d",m,s);}
-    private void rotate(){int o=getResources().getConfiguration().orientation;setRequestedOrientation(o==android.content.res.Configuration.ORIENTATION_LANDSCAPE?ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);}
+    private void rotate(){int o=getResources().getConfiguration().orientation;int target=o==android.content.res.Configuration.ORIENTATION_LANDSCAPE?android.content.res.Configuration.ORIENTATION_PORTRAIT:android.content.res.Configuration.ORIENTATION_LANDSCAPE;preferences.edit().putInt(videoKey("manual_orientation"),target).apply();setRequestedOrientation(target==android.content.res.Configuration.ORIENTATION_PORTRAIT?ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);}
+    private void applyVideoOrientation(){
+        if(orientationLocked){applyOrientationLock();return;}
+        int orientation=preferences.getInt(videoKey("manual_orientation"),0);
+        if(orientation==0)orientation=sourceVideoOrientation();
+        setRequestedOrientation(orientation==android.content.res.Configuration.ORIENTATION_PORTRAIT
+                ?ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT:ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+    }
+    private int sourceVideoOrientation(){
+        MediaMetadataRetriever retriever=new MediaMetadataRetriever();
+        try{
+            retriever.setDataSource(this,sourceUri);
+            int width=Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
+            int height=Integer.parseInt(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
+            String rotationValue=retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+            int rotation=rotationValue==null?0:Integer.parseInt(rotationValue);
+            if(rotation%180!=0){int oldWidth=width;width=height;height=oldWidth;}
+            return height>width?android.content.res.Configuration.ORIENTATION_PORTRAIT:android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+        }catch(Exception error){Log.w(TAG,"Video orientation metadata unavailable",error);return android.content.res.Configuration.ORIENTATION_PORTRAIT;}
+        finally{retriever.release();}
+    }
     private void toggleOrientationLock(TextView control){
         orientationLocked=!orientationLocked;
-        preferences.edit().putBoolean("orientation_locked",orientationLocked).apply();
+        preferences.edit().putBoolean(videoKey("orientation_locked"),orientationLocked).apply();
         if(orientationLocked){
+            preferences.edit().putInt(videoKey("manual_orientation"),getResources().getConfiguration().orientation).apply();
             applyOrientationLock();
             control.setText("ROTATION\nLOCKED");Toast.makeText(this,"Screen rotation locked",Toast.LENGTH_SHORT).show();
         }else{
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+            applyVideoOrientation();
             control.setText("ROTATION\nLOCK");Toast.makeText(this,"Auto-rotate enabled",Toast.LENGTH_SHORT).show();
         }
     }
