@@ -894,7 +894,7 @@ public class PlayerActivity extends AppCompatActivity {
             if(rotation%180!=0){int oldWidth=width;width=height;height=oldWidth;}
             return height>width?android.content.res.Configuration.ORIENTATION_PORTRAIT:android.content.res.Configuration.ORIENTATION_LANDSCAPE;
         }catch(Exception error){Log.w(TAG,"Video orientation metadata unavailable",error);return android.content.res.Configuration.ORIENTATION_PORTRAIT;}
-        finally{retriever.release();}
+        finally{try{retriever.release();}catch(java.io.IOException error){Log.w(TAG,"Video metadata retriever release failed",error);}}
     }
     private void toggleOrientationLock(TextView control){
         orientationLocked=!orientationLocked;
