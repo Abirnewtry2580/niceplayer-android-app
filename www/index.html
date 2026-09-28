@@ -426,7 +426,7 @@
         function isManuallyHidden(kind,item){const key=kind==='folder'?'hidden_folders':'hidden_videos',id=kind==='folder'?item.bucketId:item.uri;return storedList(key).includes(id);}
         function isHidden(kind,item){return !!(item&&item.dotHidden)||isManuallyHidden(kind,item)||isKeywordHidden(kind,item);}
         function playedVideoUris(){return storedList('played_video_uris');}
-        function markVideoPlayed(uri){const played=playedVideoUris();if(!played.includes(uri)){played.push(uri);localStorage.setItem('played_video_uris',JSON.stringify(played));}}
+        function markVideoPlayed(uri){const played=playedVideoUris();if(!played.includes(uri)){played.push(uri);localStorage.setItem('played_video_uris',JSON.stringify(played));}deviceVideoList.querySelectorAll('.video-row').forEach(row=>{if(row.dataset.uri===uri)row.querySelector('.thumb-new')?.remove();});}
         function newVideoBaseline(){
             let value=Number(localStorage.getItem('new_video_baseline_seconds'));
             if(!Number.isFinite(value)||value<=0){value=Math.floor(Date.now()/1000);localStorage.setItem('new_video_baseline_seconds',String(value));}
@@ -569,14 +569,13 @@
 
         function renderVideoRows(videos) {
             deviceVideoList.innerHTML = '';
-            const hiddenUris=new Set(videos.filter(videoIsHidden).map(video=>video.uri));
-            if(hiddenUris.size)localStorage.setItem('played_video_uris',JSON.stringify(playedVideoUris().filter(uri=>!hiddenUris.has(uri))));
             videos=videos.filter(video=>showHiddenOnly?videoIsHidden(video):!videoIsHidden(video));
             document.getElementById('sectionNote').innerText = videos.length + ' items';
             libraryEmpty.style.display=videos.length?'none':'block';libraryEmpty.innerText=showHiddenOnly?'No hidden videos.':'No visible videos in this folder.';
             const duplicateCount={};videos.forEach(v=>{const key=v.name+'|'+v.size;duplicateCount[key]=(duplicateCount[key]||0)+1;});
             videos.forEach(item => {
                 const row = document.createElement('div'); row.className = 'video-row';
+                row.dataset.uri=item.uri;
                 const thumb = document.createElement('div'); thumb.className = 'video-thumb';
                 thumb.textContent = '▶';
                 if (item.duration) { const badge = document.createElement('span'); badge.className = 'thumb-duration'; badge.textContent = formatTime(item.duration / 1000); thumb.appendChild(badge); }
