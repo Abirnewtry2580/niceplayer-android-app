@@ -81,6 +81,9 @@ public class PlayerActivity extends AppCompatActivity {
     private float[] equalizerGains;
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
     private boolean waveformEnabled, pipTransitionPending;
+    private boolean holdSpeedActive;
+    private float holdSpeedRestoreRate = 1f;
+    private final Runnable activateHoldSpeed = () -> { if (!locked && !dragging && player != null) { holdSpeedRestoreRate = selectedRate; player.setRate(2f); holdSpeedActive = true; } };
     private boolean screenshotInProgress;
     private long screenshotPlaybackPosition = -1;
     private boolean screenshotWasPlaying;
@@ -357,7 +360,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onSingleTapConfirmed(MotionEvent e) { toggleControls(); return true; }
-            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked){if(zoomScale>1.01f)resetVideoZoom(true);else jump(e.getX() < root.getWidth()/2f ? -TEN_SECONDS : TEN_SECONDS);} return true; }
+            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked && player != null) { handler.removeCallbacks(activateHoldSpeed); if (holdSpeedActive) stopHoldSpeed(); if (player.isPlaying()) player.pause(); else player.play(); } return true; }
         });
         scaleDetector=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
             @Override public boolean onScale(ScaleGestureDetector d){
@@ -395,7 +398,7 @@ public class PlayerActivity extends AppCompatActivity {
     private LinearLayout.LayoutParams topButtonParams(int size){LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(size),dp(size));params.setMargins(dp(3),0,dp(3),0);return params;}
 
     private void makeQuickTools(){android.widget.HorizontalScrollView scroll=new android.widget.HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);scroll.setBackgroundColor(Color.TRANSPARENT);quickTools=new LinearLayout(this);quickTools.setGravity(Gravity.CENTER_VERTICAL);quickTools.setPadding(dp(8),dp(5),dp(8),dp(5));
-        addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("⊕\nPINCH",v->zoomMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());
+        addQuick("WAVE\nFORM",v->analyzeWaveform());addQuick("PREVIEW\nSHEET",v->createPreviewSheet());addQuick("A↔B\nREPEAT",v->abRepeatMenu());addQuick("⊕\nPINCH",v->zoomMenu());addQuick("▣\nPOP-UP",v->enterPip());addQuick("≋\nCLEANUP",v->audioCleanupMenu());
         rotationLockControl=addQuick(orientationLocked?"ROTATION\nLOCKED":"ROTATION\nLOCK",null);rotationLockControl.setOnClickListener(v->toggleOrientationLock(rotationLockControl));
         addQuick("VOL\nMUTE",v->{boolean mute=player.getVolume()>0;player.setVolume(mute?0:100);});addQuick("SAFE\nAUDIO",v->toggleHeadphoneSafety());TextView speed=addQuick("1×\nSPEED",null);speed.setOnClickListener(v->speedMenu(speed));
         scroll.addView(quickTools,new android.widget.HorizontalScrollView.LayoutParams(-2,-1));FrameLayout.LayoutParams params=new FrameLayout.LayoutParams(-1,dp(70),Gravity.TOP);params.topMargin=dp(60);root.addView(scroll,params);quickTools.setTag(scroll);
@@ -538,16 +541,16 @@ public class PlayerActivity extends AppCompatActivity {
         }
         detector.onTouchEvent(e);
         if(e.getActionMasked()==MotionEvent.ACTION_DOWN){
-            downX=e.getX(); downY=e.getY(); downTime=Math.max(0,player.getTime()); dragging=false;
+            downX=e.getX(); downY=e.getY(); downTime=Math.max(0,player.getTime()); dragging=false; handler.removeCallbacks(activateHoldSpeed); handler.postDelayed(activateHoldSpeed, 350);
             WindowManager.LayoutParams p=getWindow().getAttributes(); startBrightness=p.screenBrightness<0?.5f:p.screenBrightness;
             startVolume=audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
         }
         else if(e.getActionMasked()==MotionEvent.ACTION_MOVE){
             float dx=e.getX()-downX,dy=e.getY()-downY;
             if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>dp(20)){
-                dragging=true;long len=player.getLength();if(len>0){long delta=(long)(dx/root.getWidth()*len),target=Math.max(0,Math.min(len,downTime+delta));player.setTime(target);hint.setText((delta>=0?"+ ":"− ")+clock(Math.abs(delta))+"   "+clock(target));hint.setVisibility(View.VISIBLE);}
+                handler.removeCallbacks(activateHoldSpeed); if(holdSpeedActive)stopHoldSpeed(); dragging=true;long len=player.getLength();if(len>0){long delta=(long)(dx/root.getWidth()*len),target=Math.max(0,Math.min(len,downTime+delta));player.setTime(target);}
             } else if(Math.abs(dy)>dp(20)) {
-                dragging=true; float change=-dy/root.getHeight();
+                handler.removeCallbacks(activateHoldSpeed); if(holdSpeedActive)stopHoldSpeed(); dragging=true; float change=-dy/root.getHeight();
                 if(downX<root.getWidth()/2f){
                     WindowManager.LayoutParams p=getWindow().getAttributes();p.screenBrightness=Math.max(.02f,Math.min(1f,startBrightness+change));getWindow().setAttributes(p);
                     hint.setText("Brightness  "+Math.round(p.screenBrightness*100)+"%");showGestureLevel(p.screenBrightness,false);
@@ -558,7 +561,7 @@ public class PlayerActivity extends AppCompatActivity {
                 hint.setVisibility(View.VISIBLE);
             }
         }
-        else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){hint.setVisibility(View.GONE);if(gestureLevel!=null)gestureLevel.setVisibility(View.GONE);dragging=false;}
+        else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){handler.removeCallbacks(activateHoldSpeed);if(holdSpeedActive)stopHoldSpeed();hint.setVisibility(View.GONE);if(gestureLevel!=null)gestureLevel.setVisibility(View.GONE);dragging=false;}
         return true;
     }
 
@@ -586,7 +589,8 @@ public class PlayerActivity extends AppCompatActivity {
         }).show();
     }
 
-    private void jump(long amount){long len=Math.max(0,player.getLength());player.setTime(Math.max(0,Math.min(len,player.getTime()+amount)));hint.setText(amount>0?"+10 seconds":"−10 seconds");hint.setVisibility(View.VISIBLE);handler.postDelayed(()->hint.setVisibility(View.GONE),550);}
+    private void jump(long amount){long len=Math.max(0,player.getLength());player.setTime(Math.max(0,Math.min(len,player.getTime()+amount)));}
+    private void stopHoldSpeed(){if(player!=null)player.setRate(holdSpeedRestoreRate);holdSpeedActive=false;}
     private void speedMenu(TextView anchor){android.view.ContextThemeWrapper popupContext=new android.view.ContextThemeWrapper(this,R.style.NicePlayerPopupTheme);
         PopupMenu m=new PopupMenu(popupContext,anchor);float[] s={.25f,.5f,.75f,1f,1.25f,1.5f,2f};for(int i=0;i<s.length;i++)m.getMenu().add(0,i,i,s[i]+"×");m.setOnMenuItemClickListener(x->{float n=s[x.getItemId()];selectedRate=n;preferences.edit().putFloat("playback_rate",n).apply();player.setRate(n);anchor.setText(n==1f?"1×":n+"×");return true;});m.show();}
     private int ratioMode;
