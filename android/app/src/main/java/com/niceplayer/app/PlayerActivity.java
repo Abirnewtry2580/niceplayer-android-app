@@ -81,9 +81,6 @@ public class PlayerActivity extends AppCompatActivity {
     private float[] equalizerGains;
     private boolean headphoneSafety = true, pausedByFocus, autoPip = true;
     private boolean waveformEnabled, pipTransitionPending;
-    private boolean holdSpeedActive;
-    private float holdSpeedRestoreRate = 1f;
-    private final Runnable activateHoldSpeed = () -> { if (!locked && !dragging && player != null && player.isPlaying()) { holdSpeedRestoreRate = selectedRate; player.setRate(2f); holdSpeedActive = true; } };
     private boolean screenshotInProgress;
     private long screenshotPlaybackPosition = -1;
     private boolean screenshotWasPlaying;
@@ -96,6 +93,9 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean positionRestoredForItem;
     private boolean playbackStartedForItem;
     private float selectedRate = 1f;
+    private boolean holdSpeedActive;
+    private float holdSpeedRestoreRate = 1f;
+    private final Runnable activateHoldSpeed = () -> { if (!locked && !dragging && player != null && player.isPlaying()) { holdSpeedRestoreRate = selectedRate; player.setRate(2f); holdSpeedActive = true; } };
     private AudioFocusRequest focusRequest;
     private boolean audioFocusHeld;
     private final ActivityResultLauncher<String[]> subtitlePicker = registerForActivityResult(
