@@ -83,7 +83,7 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean waveformEnabled, pipTransitionPending;
     private boolean holdSpeedActive;
     private float holdSpeedRestoreRate = 1f;
-    private final Runnable activateHoldSpeed = () -> { if (!locked && !dragging && player != null) { holdSpeedRestoreRate = selectedRate; player.setRate(2f); holdSpeedActive = true; } };
+    private final Runnable activateHoldSpeed = () -> { if (!locked && !dragging && player != null && player.isPlaying()) { holdSpeedRestoreRate = selectedRate; player.setRate(2f); holdSpeedActive = true; } };
     private boolean screenshotInProgress;
     private long screenshotPlaybackPosition = -1;
     private boolean screenshotWasPlaying;
@@ -329,6 +329,7 @@ public class PlayerActivity extends AppCompatActivity {
     private void forgetCurrentVideo(){if(preferences==null||sourceUri==null)return;String hiddenUri=sourceUri.toString();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri!=null&&!uri.equals(hiddenUri)){uris.add(uri);names.add(preferences.getString("history_name_"+i,"Video"));}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
 
     private void playAt(int index) {
+        handler.removeCallbacks(activateHoldSpeed); if(holdSpeedActive)stopHoldSpeed();
         if (index < 0 || index >= playlistUris.size()) {
             Toast.makeText(this, index < 0 ? "This is the first video" : "Playlist finished", Toast.LENGTH_SHORT).show();
             return;
@@ -541,7 +542,7 @@ public class PlayerActivity extends AppCompatActivity {
         }
         detector.onTouchEvent(e);
         if(e.getActionMasked()==MotionEvent.ACTION_DOWN){
-            downX=e.getX(); downY=e.getY(); downTime=Math.max(0,player.getTime()); dragging=false; handler.removeCallbacks(activateHoldSpeed); handler.postDelayed(activateHoldSpeed, 350);
+            downX=e.getX(); downY=e.getY(); downTime=Math.max(0,player.getTime()); dragging=false; handler.removeCallbacks(activateHoldSpeed); if(player!=null&&player.isPlaying())handler.postDelayed(activateHoldSpeed, 350);
             WindowManager.LayoutParams p=getWindow().getAttributes(); startBrightness=p.screenBrightness<0?.5f:p.screenBrightness;
             startVolume=audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
         }
@@ -1000,7 +1001,7 @@ public class PlayerActivity extends AppCompatActivity {
         immersive();
     }
     private void immersive(){getWindow().getDecorView().setSystemUiVisibility(5894|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);}
-    @Override protected void onPause(){savePositionImmediately();surfaceRefreshPending=!screenshotInProgress;super.onPause();}
+    @Override protected void onPause(){handler.removeCallbacks(activateHoldSpeed);if(holdSpeedActive)stopHoldSpeed();savePositionImmediately();surfaceRefreshPending=!screenshotInProgress;super.onPause();}
     @Override protected void onResume(){
         super.onResume();
         if(!surfaceRefreshPending||player==null||video==null)return;
