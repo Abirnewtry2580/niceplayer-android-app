@@ -151,8 +151,8 @@ public class PlayerActivity extends AppCompatActivity {
         subtitleStyle = preferences.getInt("subtitle_style", 0);
         headphoneSafety = preferences.getBoolean("headphone_safety", true);
         autoPip = preferences.getBoolean("auto_pip", true);
-        // Waveform is scoped to the current video and always starts off.
-        waveformEnabled = false;
+        // Waveform is scoped to the current video and persists independently.
+        waveformEnabled = preferences.getBoolean(videoKey("waveform_enabled"), false);
         orientationLocked = preferences.contains(videoKey("orientation_locked"))
                 ? preferences.getBoolean(videoKey("orientation_locked"), false)
                 : preferences.getBoolean("orientation_locked", false);
@@ -338,7 +338,8 @@ public class PlayerActivity extends AppCompatActivity {
         playlistIndex = index;
         sourceUri = Uri.parse(playlistUris.get(index));
         orientationLocked=preferences.getBoolean(videoKey("orientation_locked"),false);
-        disableWaveformForNewVideo();
+        waveformEnabled=preferences.getBoolean(videoKey("waveform_enabled"),false);
+        if(waveform!=null){waveform.setVisibility(waveformEnabled?View.VISIBLE:View.GONE);waveform.clearAnalysis();}
         positionRestoredForItem=false;
         playbackStartedForItem=false;
         softwareRetryAttempted = false;
@@ -349,6 +350,7 @@ public class PlayerActivity extends AppCompatActivity {
         applyVideoOrientation();
         startPlayback(true);
         if(waveform!=null)waveform.clearAnalysis();
+        if(waveformEnabled)handler.postDelayed(this::loadWaveform,500);
     }
 
     private void makeUi() {
@@ -650,6 +652,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void analyzeWaveform(){
         waveformEnabled=!waveformEnabled;
+        preferences.edit().putBoolean(videoKey("waveform_enabled"),waveformEnabled).apply();
         if(waveform==null)return;
         if(!waveformEnabled){waveform.setVisibility(View.GONE);waveform.clearAnalysis();Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
         showWaveformOverlay();
