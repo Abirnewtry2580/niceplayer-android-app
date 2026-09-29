@@ -445,12 +445,13 @@ public class PlayerActivity extends AppCompatActivity {
     private void loadWaveform(){
         if(waveform==null||!waveformEnabled)return;
         waveform.clearAnalysis();
+        waveform.setLoading(true);
         Uri uri=sourceUri;
         long duration=Math.max(0,player.getLength());
         int buckets=(int)Math.max(600,Math.min(72_000,duration/100L));
         worker.execute(()->AudioWaveformExtractor.extract(this,uri,buckets,new AudioWaveformExtractor.Callback(){
-            public void complete(AudioWaveformExtractor.Result result){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null&&waveformEnabled)waveform.setAnalysis(result);finishWaveformAnalysis();});}
-            public void failed(){runOnUiThread(()->{Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();});}
+            public void complete(AudioWaveformExtractor.Result result){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null&&waveformEnabled){waveform.setLoading(false);waveform.setAnalysis(result);}finishWaveformAnalysis();});}
+            public void failed(){runOnUiThread(()->{if(waveform!=null)waveform.setLoading(false);Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();});}
         }));
     }
     private void finishWaveformAnalysis(){if(resumeAfterWaveform&&player!=null&&!player.isPlaying())player.play();resumeAfterWaveform=false;}
