@@ -179,7 +179,7 @@ public class PlayerActivity extends AppCompatActivity {
         player.attachViews(video, null, false, false);
         player.setEventListener(e -> runOnUiThread(() -> {
             if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
-            else if (e.type == MediaPlayer.Event.Playing) { playbackStartedForItem=true;restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService();scheduleControlsHide(); }
+            else if (e.type == MediaPlayer.Event.Playing) { playbackStartedForItem=true;restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyVideoOrientation();applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService();scheduleControlsHide(); }
             else if (e.type == MediaPlayer.Event.Paused) showControls(false);
             else if (e.type == MediaPlayer.Event.EndReached) {
                 if (!playbackStartedForItem) handlePlaybackError();
