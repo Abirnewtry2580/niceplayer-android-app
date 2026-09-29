@@ -19,6 +19,7 @@ public class WaveformView extends View {
     private boolean[] speech = new boolean[0];
     private long positionMs;
     private long durationMs;
+    private boolean loading;
 
     public WaveformView(Context context) { super(context); init(); }
     public WaveformView(Context context, AttributeSet attrs) { super(context, attrs); init(); }
@@ -33,7 +34,8 @@ public class WaveformView extends View {
         invalidate();
     }
 
-    public void clearAnalysis() { setAnalysis(null); }
+    public void clearAnalysis() { loading=false; setAnalysis(null); }
+    public void setLoading(boolean value) { loading=value; invalidate(); }
 
     public void setTimeline(long position, long duration) {
         positionMs = Math.max(0, position);
@@ -49,7 +51,12 @@ public class WaveformView extends View {
         if (levels.length == 0 || durationMs <= 0) {
             paint.setColor(0x995B6472);
             paint.setStrokeWidth(Math.max(2f, getResources().getDisplayMetrics().density * 2f));
-            for (float x = 8; x < width; x += 12) canvas.drawCircle(x, centerY, 1.8f, paint);
+            float phase=loading?(System.currentTimeMillis()%900L)/900f:0f;
+            for (float x = 8; x < width; x += 12) {
+                float pulse=loading?.55f+.45f*(float)Math.sin((x/width+phase)*Math.PI*2):1f;
+                canvas.drawCircle(x, centerY, Math.max(1.4f,2.2f*pulse), paint);
+            }
+            if(loading)postInvalidateDelayed(32);
             return;
         }
 
@@ -63,16 +70,21 @@ public class WaveformView extends View {
         for (int column = 0; column < columns; column++) {
             long sampleTime = windowStart + Math.round((column + .5f) * windowDuration / columns);
             float x = (column + .5f) * step;
-            float level = levelAt(sampleTime);
+            float level = smoothedLevelAt(sampleTime);
+            boolean played=sampleTime<=positionMs;
             if (level <= SILENCE_THRESHOLD || sampleTime < 0 || sampleTime > durationMs) {
-                paint.setColor(0x995B6472);
-                canvas.drawCircle(x, centerY, Math.max(1.5f, stroke * .38f), paint);
+                paint.setColor(played?0xB05B6472:0x705B6472);
+                canvas.drawCircle(x, centerY, Math.max(1.4f, stroke * .34f), paint);
                 continue;
             }
 
             float half = Math.max(stroke, level * height * .43f);
-            paint.setColor(speechAt(sampleTime) ? 0xFF19E6C1 : 0xB86B7280);
-            paint.setStrokeWidth(stroke);
+            boolean spoken=speechAt(sampleTime);
+            int alpha=played?255:175;
+            int base=spoken?0x0019E6C1:0x006B7280;
+            paint.setColor((alpha<<24)|base);
+            float centerDistance=Math.abs(x-width/2f)/Math.max(1f,step);
+            paint.setStrokeWidth(centerDistance<.75f?stroke*1.22f:stroke);
             canvas.drawLine(x, centerY - half, x, centerY + half, paint);
         }
     }
@@ -82,6 +94,11 @@ public class WaveformView extends View {
         int index = Math.max(0, Math.min(speech.length - 1,
                 Math.round(timeMs * (speech.length - 1f) / Math.max(1L, durationMs))));
         return speech[index];
+    }
+
+    private float smoothedLevelAt(long timeMs) {
+        long span=Math.max(1L,durationMs/Math.max(1,levels.length));
+        return (levelAt(timeMs-span)+2f*levelAt(timeMs)+levelAt(timeMs+span))/4f;
     }
 
     private float levelAt(long timeMs) {
