@@ -363,7 +363,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onSingleTapConfirmed(MotionEvent e) { toggleControls(); return true; }
-            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked && player != null) { handler.removeCallbacks(activateHoldSpeed); if (holdSpeedActive) stopHoldSpeed(); if (player.isPlaying()) player.pause(); else player.play(); } return true; }
+            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked && player != null) { handler.removeCallbacks(activateHoldSpeed); if (holdSpeedActive) stopHoldSpeed(); jump(e.getX() < root.getWidth()/2f ? -TEN_SECONDS : TEN_SECONDS); } return true; }
         });
         scaleDetector=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
             @Override public boolean onScale(ScaleGestureDetector d){
@@ -551,7 +551,7 @@ public class PlayerActivity extends AppCompatActivity {
         else if(e.getActionMasked()==MotionEvent.ACTION_MOVE){
             float dx=e.getX()-downX,dy=e.getY()-downY;
             if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>dp(20)){
-                handler.removeCallbacks(activateHoldSpeed); if(holdSpeedActive)stopHoldSpeed(); dragging=true;long len=player.getLength();if(len>0){long delta=(long)(dx/root.getWidth()*len),target=Math.max(0,Math.min(len,downTime+delta));player.setTime(target);}
+                handler.removeCallbacks(activateHoldSpeed); if(holdSpeedActive)stopHoldSpeed(); dragging=true;long len=player.getLength();if(len>0){long delta=(long)(dx/root.getWidth()*60_000L),target=Math.max(0,Math.min(len,downTime+delta));player.setTime(target);}
             } else if(Math.abs(dy)>dp(20)) {
                 handler.removeCallbacks(activateHoldSpeed); if(holdSpeedActive)stopHoldSpeed(); dragging=true; float change=-dy/root.getHeight();
                 if(downX<root.getWidth()/2f){
