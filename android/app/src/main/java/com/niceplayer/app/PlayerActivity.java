@@ -477,16 +477,16 @@ public class PlayerActivity extends AppCompatActivity {
             if(event.getActionMasked()==MotionEvent.ACTION_MOVE){
                 float x=waveformStartX+event.getRawX()-waveformDragStartX;
                 float y=waveformStartY+event.getRawY()-waveformDragStartY;
-                float minX=dp(8),maxX=Math.max(minX,root.getWidth()-view.getWidth()-dp(8));
-                float minY=dp(8),maxY=Math.max(minY,root.getHeight()-view.getHeight()-dp(8));
+                float minX=0f,maxX=Math.max(0f,root.getWidth()-view.getWidth());
+                float minY=0f,maxY=Math.max(0f,root.getHeight()-view.getHeight());
                 x=Math.max(minX,Math.min(maxX,x));
                 y=Math.max(minY,Math.min(maxY,y));
                 view.setX(x);view.setY(y);return true;
             }
             if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL){
-                float minX=dp(8),minY=dp(8);
-                float maxX=Math.max(minX+1,root.getWidth()-view.getWidth()-dp(8));
-                float maxY=Math.max(minY+1,root.getHeight()-view.getHeight()-dp(8));
+                float minX=0f,minY=0f;
+                float maxX=Math.max(1f,root.getWidth()-view.getWidth());
+                float maxY=Math.max(1f,root.getHeight()-view.getHeight());
                 preferences.edit().putFloat("waveform_x_fraction",(view.getX()-minX)/(maxX-minX)).putFloat("waveform_y_fraction",(view.getY()-minY)/(maxY-minY)).apply();
                 return true;
             }
@@ -496,9 +496,9 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void positionWaveformFromPreferences(){
         if(waveform==null||root.getWidth()==0||root.getHeight()==0)return;
-        float minX=dp(8),minY=dp(8);
-        float maxX=Math.max(minX,root.getWidth()-waveform.getWidth()-dp(8));
-        float maxY=Math.max(minY,root.getHeight()-waveform.getHeight()-dp(8));
+        float minX=0f,minY=0f;
+        float maxX=Math.max(0f,root.getWidth()-waveform.getWidth());
+        float maxY=Math.max(0f,root.getHeight()-waveform.getHeight());
         float savedX=Math.max(0f,Math.min(1f,preferences.getFloat("waveform_x_fraction",.5f)));
         float savedY=Math.max(0f,Math.min(1f,preferences.getFloat("waveform_y_fraction",.55f)));
         waveform.setX(minX+savedX*(maxX-minX));waveform.setY(minY+savedY*(maxY-minY));
