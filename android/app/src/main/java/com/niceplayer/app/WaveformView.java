@@ -50,7 +50,6 @@ public class WaveformView extends View {
             paint.setColor(0x995B6472);
             paint.setStrokeWidth(Math.max(2f, getResources().getDisplayMetrics().density * 2f));
             for (float x = 8; x < width; x += 12) canvas.drawCircle(x, centerY, 1.8f, paint);
-            drawPlayhead(canvas, width, height);
             return;
         }
 
@@ -76,7 +75,6 @@ public class WaveformView extends View {
             paint.setStrokeWidth(stroke);
             canvas.drawLine(x, centerY - half, x, centerY + half, paint);
         }
-        drawPlayhead(canvas, width, height);
     }
 
     private boolean speechAt(long timeMs) {
@@ -95,10 +93,4 @@ public class WaveformView extends View {
         return Math.max(0f, Math.min(1f, levels[left] * (1f - mix) + levels[right] * mix));
     }
 
-    private void drawPlayhead(Canvas canvas, float width, float height) {
-        paint.setStrokeCap(Paint.Cap.SQUARE);
-        paint.setColor(Color.WHITE);
-        paint.setStrokeWidth(Math.max(2f, getResources().getDisplayMetrics().density * 1.5f));
-        canvas.drawLine(width / 2f, 3f, width / 2f, height - 3f, paint);
-    }
 }
