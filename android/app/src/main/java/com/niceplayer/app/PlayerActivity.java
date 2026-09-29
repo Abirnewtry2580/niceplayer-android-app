@@ -363,7 +363,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onSingleTapConfirmed(MotionEvent e) { toggleControls(); return true; }
-            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked && player != null) { handler.removeCallbacks(activateHoldSpeed); if (holdSpeedActive) stopHoldSpeed(); jump(e.getX() < root.getWidth()/2f ? -TEN_SECONDS : TEN_SECONDS); } return true; }
+            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked && player != null) { handler.removeCallbacks(activateHoldSpeed); if (holdSpeedActive) stopHoldSpeed(); float x=e.getX(), w=root.getWidth(); if(x < w/3f) jump(-TEN_SECONDS); else if(x > w*2f/3f) jump(TEN_SECONDS); else { if(player.isPlaying()) player.pause(); else player.play(); } } return true; }
         });
         scaleDetector=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
             @Override public boolean onScale(ScaleGestureDetector d){
