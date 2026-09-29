@@ -150,7 +150,7 @@ public class PlayerActivity extends AppCompatActivity {
         autoPip = preferences.getBoolean("auto_pip", true);
         // Waveform is scoped to the current video and always starts off.
         waveformEnabled = false;
-        orientationLocked = preferences.getBoolean(videoKey("orientation_locked"), false);
+        orientationLocked = preferences.contains(videoKey("orientation_locked"))\n                ? preferences.getBoolean(videoKey("orientation_locked"), false)\n                : preferences.getBoolean("orientation_locked", false);\n        migrateLegacyOrientationPreference();
         selectedRate = preferences.getFloat("playback_rate", 1f);
         ratioMode = preferences.getInt("ratio_mode", 0);
         audioManager = (AudioManager)getSystemService(Context.AUDIO_SERVICE);
@@ -267,7 +267,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private String positionKey() { return "position_" + sourceUri; }
-    private String videoKey(String setting) { return "video_" + setting + "_" + sourceUri; }
+    private String videoKey(String setting) { return "video_" + setting + "_" + sourceUri; }\n    private void migrateLegacyOrientationPreference() {\n        String key = videoKey("orientation_locked");\n        if (!preferences.contains(key) && preferences.contains("orientation_locked")) {\n            preferences.edit().putBoolean(key, preferences.getBoolean("orientation_locked", false)).apply();\n        }\n    }
 
     private void restorePosition() {
         if(positionRestoredForItem)return;
