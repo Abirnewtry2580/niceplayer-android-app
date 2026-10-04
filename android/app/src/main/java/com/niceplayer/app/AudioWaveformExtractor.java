@@ -26,15 +26,18 @@ final class AudioWaveformExtractor {
         try {
             callback.complete(decodePcm(context, uri, buckets));
         } catch (Exception decodeError) {
+            if (Thread.currentThread().isInterrupted()) return;
             Log.w(TAG, "PCM waveform unavailable; using encoded-audio fallback", decodeError);
             try { callback.complete(envelopeOnly(readEncodedEnvelope(context, uri, buckets))); }
             catch (Exception packetError) {
+                if (Thread.currentThread().isInterrupted()) return;
                 // Some containers are playable by VLC but not understood by MediaExtractor.
                 // A final streaming envelope keeps the timeline usable without loading the
                 // whole movie into memory.
                 Log.w(TAG, "Audio packets unavailable; using container fallback", packetError);
                 try { callback.complete(envelopeOnly(readContainerEnvelope(context, uri, buckets))); }
                 catch (Exception fallbackError) {
+                    if (Thread.currentThread().isInterrupted()) return;
                     Log.e(TAG, "Waveform extraction failed for " + uri, fallbackError);
                     callback.failed();
                 }
@@ -53,6 +56,7 @@ final class AudioWaveformExtractor {
             int pcmEncoding = AudioFormat.ENCODING_PCM_16BIT;
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             while (!outputDone) {
+                checkCancelled();
                 if (!inputDone) {
                     int index = codec.dequeueInputBuffer(10_000);
                     if (index >= 0) {
@@ -96,6 +100,7 @@ final class AudioWaveformExtractor {
             Track track = selectAudioTrack(extractor, context, uri); float[] peaks = new float[buckets];
             ByteBuffer packet = ByteBuffer.allocateDirect(256 * 1024);
             while (true) {
+                checkCancelled();
                 packet.clear(); int size = extractor.readSampleData(packet, 0); if (size < 0) break;
                 int limit = Math.min(size, packet.capacity()), step = Math.max(1, limit / 2048), count = 0; long sum = 0;
                 for (int i = 0; i < limit; i += step) { sum += Math.abs((int)packet.get(i)); count++; }
@@ -114,6 +119,7 @@ final class AudioWaveformExtractor {
             if (input == null) throw new IllegalStateException("Cannot open media stream");
             int read;
             while ((read = input.read(buffer)) >= 0) {
+                checkCancelled();
                 if (read == 0) continue;
                 long sum = 0; int step = Math.max(1, read / 1024), count = 0;
                 for (int i = 0; i < read; i += step) { sum += Math.abs((int)buffer[i]); count++; }
@@ -123,6 +129,10 @@ final class AudioWaveformExtractor {
         }
         if (bucket == 0) throw new IllegalStateException("Empty media stream");
         return normalize(peaks);
+    }
+
+    private static void checkCancelled() throws InterruptedException {
+        if (Thread.currentThread().isInterrupted()) throw new InterruptedException("Waveform cancelled");
     }
 
     private static Track selectAudioTrack(MediaExtractor extractor, Context context, Uri uri) throws Exception {
