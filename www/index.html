@@ -448,11 +448,11 @@
             return new Promise(resolve=>{const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';
                 sheet.innerHTML='<div class="action-title"></div><div class="action-help"></div><textarea class="action-input"></textarea><button class="primary" data-action="save">Save</button><button data-action="cancel">Cancel</button>';
                 sheet.querySelector('.action-title').textContent=title;sheet.querySelector('.action-help').textContent=message;const input=sheet.querySelector('.action-input');input.value=value;input.style.minHeight='58px';shade.appendChild(sheet);document.body.appendChild(shade);
-                let done=false;const finish=result=>{if(done)return;done=true;shade.remove();resolve(result);};shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')finish(null);});sheet.querySelector('[data-action="save"]').onclick=()=>finish(input.value);setTimeout(()=>{input.focus();input.select();},50);
+                let done=false;const finish=result=>{if(done)return;done=true;shade.remove();resolve(result);};shade.cancelAction=()=>finish(null);shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')finish(null);});sheet.querySelector('[data-action="save"]').onclick=()=>finish(input.value);setTimeout(()=>{input.focus();input.select();},50);
             });
         }
         function askConfirm(title,message,danger=false){
-            return new Promise(resolve=>{const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><div class="action-help"></div><button data-action="yes">Continue</button><button data-action="cancel">Cancel</button>';sheet.querySelector('.action-title').textContent=title;sheet.querySelector('.action-help').textContent=message;const yes=sheet.querySelector('[data-action="yes"]');if(danger)yes.className='danger';shade.appendChild(sheet);document.body.appendChild(shade);let done=false;const finish=result=>{if(done)return;done=true;shade.remove();resolve(result);};shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')finish(false);});yes.onclick=()=>finish(true);});
+            return new Promise(resolve=>{const shade=document.createElement('div');shade.className='action-shade';const sheet=document.createElement('div');sheet.className='action-sheet';sheet.innerHTML='<div class="action-title"></div><div class="action-help"></div><button data-action="yes">Continue</button><button data-action="cancel">Cancel</button>';sheet.querySelector('.action-title').textContent=title;sheet.querySelector('.action-help').textContent=message;const yes=sheet.querySelector('[data-action="yes"]');if(danger)yes.className='danger';shade.appendChild(sheet);document.body.appendChild(shade);let done=false;const finish=result=>{if(done)return;done=true;shade.remove();resolve(result);};shade.cancelAction=()=>finish(false);shade.addEventListener('click',event=>{if(event.target===shade||event.target.dataset.action==='cancel')finish(false);});yes.onclick=()=>finish(true);});
         }
 
         function videoLibraryPlugin() {
@@ -478,7 +478,7 @@
         function closeLibraryHome() { libraryScreen.classList.add('hidden'); }
         function openLibraryHome() { video.pause(); libraryScreen.classList.remove('hidden'); showVideoFolders(); }
         function handleAndroidBack() {
-            const actionShade=document.querySelector('.action-shade');if(actionShade){actionShade.remove();return;}
+            const actionShade=document.querySelector('.action-shade');if(actionShade){if(actionShade.cancelAction)actionShade.cancelAction();else actionShade.remove();return;}
             if (document.querySelector('.modal-panel.active')) { closePanels(); return; }
             if (libraryScreen.classList.contains('hidden')) { openLibraryHome(); return; }
             if (currentFolder) { handleLibraryBack(); return; }
@@ -503,7 +503,7 @@
             try {
                 const result = await plugin.getFolders();
                 deviceFolders = result.folders || [];
-                renderFolderCards(deviceFolders);
+                if (!currentFolder && !showHiddenOnly) renderFolderCards(deviceFolders);
                 await loadPlaybackHistory();
             } catch (error) {
                 libraryEmpty.innerText = 'Allow video access in Android Settings, then reopen NicePlayer.';
@@ -519,7 +519,7 @@
             document.getElementById('sectionName').innerText = 'Video folders';
             document.getElementById('sectionNote').innerText = folders.length + ' found';
             document.getElementById('libraryBack').style.display = 'none';
-            const favorites = JSON.parse(localStorage.getItem('favorite_folders') || '[]');
+            const favorites = storedList('favorite_folders');
             folders = folders.filter(folder => showHiddenOnly ? isHidden('folder',folder) : !isHidden('folder',folder)).sort((a,b)=>(favorites.includes(b.bucketId)?1:0)-(favorites.includes(a.bucketId)?1:0));
             libraryEmpty.style.display = folders.length ? 'none' : 'block';
             libraryEmpty.innerText = showHiddenOnly?'No hidden folders or videos.':'No visible videos found on this device.';
@@ -562,9 +562,10 @@
             deviceVideoList.innerHTML = '<div class="library-empty">Loading videos…</div>';
             try {
                 const result = await plugin.getVideos({ bucketId: folder.bucketId });
+                if (currentFolder !== folder || showHiddenOnly) return;
                 visibleDeviceVideos = (result.videos || []).map(item => ({ ...item, bucketId:folder.bucketId,bucketName:folder.name,url: Capacitor.convertFileSrc(item.uri) }));
                 renderVideoRows(visibleDeviceVideos);
-            } catch (error) { deviceVideoList.innerHTML = '<div class="library-empty">Could not read this folder.</div>'; }
+            } catch (error) { if (currentFolder === folder && !showHiddenOnly) deviceVideoList.innerHTML = '<div class="library-empty">Could not read this folder.</div>'; }
         }
 
         function renderVideoRows(videos) {
@@ -689,8 +690,8 @@
             else if(visibleDeviceVideos.length){const videos=[...visibleDeviceVideos];videos.sort((a,b)=>mode==='name'?a.name.localeCompare(b.name):mode==='size'?b.size-a.size:mode==='duration'?b.duration-a.duration:0);renderVideoRows(videos);}
             else{const folders=[...deviceFolders];if(mode==='name')folders.sort((a,b)=>a.name.localeCompare(b.name));renderFolderCards(folders);}
         }
-        function toggleFolderFavorite(id){let values=JSON.parse(localStorage.getItem('favorite_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('favorite_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
-        function toggleFolderHidden(id){let values=JSON.parse(localStorage.getItem('hidden_folders')||'[]');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('hidden_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
+        function toggleFolderFavorite(id){let values=storedList('favorite_folders');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('favorite_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
+        function toggleFolderHidden(id){let values=storedList('hidden_folders');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('hidden_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
         async function loadPlaybackHistory(){const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),allItems=result.items||[],hiddenUris=[];const items=allItems.filter(item=>{const dotHidden=String(item.bucketName||'').trim().startsWith('.'),videoHidden=isHidden('video',{uri:item.uri,name:item.fileName||item.name,dotHidden,isDownloading:false}),folderHidden=item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||'',dotHidden,hasRunningDownloads:false});if(videoHidden||folderHidden){hiddenUris.push(item.uri);return false;}return true;});if(hiddenUris.length&&plugin.removeHistory)await plugin.removeHistory({uris:hiddenUris});items.forEach(item=>markVideoPlayed(item.uri));if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>{plugin.playVideo({uri:item.uri,title:item.name,privateMode:false,index:0,uris:[item.uri],titles:[item.name]});};strip.appendChild(card);});}catch(error){}}
 
         function setVideoSource(url) {
