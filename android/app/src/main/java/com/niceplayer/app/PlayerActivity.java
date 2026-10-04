@@ -641,7 +641,8 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private boolean gesture(MotionEvent e, GestureDetector detector) {
-        scaleDetector.onTouchEvent(e);if(locked){detector.onTouchEvent(e);return true;}
+        if(locked){detector.onTouchEvent(e);return true;}
+        scaleDetector.onTouchEvent(e);
         if(e.getPointerCount()>1||scaleDetector.isInProgress()){
             handler.removeCallbacks(activateHoldSpeed);
             if(holdSpeedActive)stopHoldSpeed();
