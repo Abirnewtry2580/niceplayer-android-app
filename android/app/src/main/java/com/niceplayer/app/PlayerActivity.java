@@ -92,6 +92,8 @@ public class PlayerActivity extends AppCompatActivity {
     private float waveformDragStartX, waveformDragStartY, waveformStartX, waveformStartY;
     private long pointA = -1, pointB = -1, audioDelay, subtitleDelay;
     private boolean resumeAfterWaveform;
+    private int waveformGeneration;
+    private java.util.concurrent.Future<?> waveformTask;
     private boolean surfaceRefreshPending;
     private boolean positionRestoredForItem;
     private boolean playbackStartedForItem;
@@ -123,7 +125,7 @@ public class PlayerActivity extends AppCompatActivity {
                 if(waveform!=null&&waveformEnabled&&length>0)waveform.setTimeline(now,length);
                 updateTimeLabels(now, length);
                 play.setText(player.isPlaying() ? "Ⅱ" : "▶");
-                if (player.isPlaying() && now - lastPositionSave > 5000) {
+                if (player.isPlaying() && Math.abs(now - lastPositionSave) > 5000) {
                     savePosition();
                     lastPositionSave = now;
                 }
@@ -183,6 +185,7 @@ public class PlayerActivity extends AppCompatActivity {
         makeUi();
         player.attachViews(video, null, false, false);
         player.setEventListener(e -> runOnUiThread(() -> {
+            if (player == null || isFinishing() || isDestroyed()) return;
             if (e.type == MediaPlayer.Event.EncounteredError) handlePlaybackError();
             else if (e.type == MediaPlayer.Event.Playing) { playbackStartedForItem=true;restorePosition();if(!privateMode)recordHistory();else forgetCurrentVideo();player.setRate(selectedRate);applyVideoOrientation();applyStoredRatio();applyAudioCleanup();applySafeStart();startPlaybackService();scheduleControlsHide(); }
             else if (e.type == MediaPlayer.Event.Paused) showControls(false);
@@ -287,13 +290,14 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void restorePosition() {
-        if(positionRestoredForItem)return;
-        positionRestoredForItem=true;
         if (pendingSeek >= 0) {
+            positionRestoredForItem=true;
             player.setTime(pendingSeek);
             pendingSeek = -1;
             return;
         }
+        if(positionRestoredForItem)return;
+        positionRestoredForItem=true;
         long saved = preferences.getLong(positionKey(), 0);
         long length = player.getLength();
         if (saved > 5000 && (length <= 0 || saved < length - 10000)) player.setTime(saved);
@@ -409,6 +413,9 @@ public class PlayerActivity extends AppCompatActivity {
         if (!playbackEnded) savePosition();
         playbackEnded = false;
         pendingSeek = fromBeginning ? 0 : -1;
+        lastPositionSave = 0;
+        cancelWaveformAnalysis();
+        pointA = pointB = -1;
         playlistIndex = index;
         sourceUri = Uri.parse(playlistUris.get(index));
         orientationLocked=preferences.getBoolean(videoKey("orientation_locked"),false);
@@ -517,19 +524,41 @@ public class PlayerActivity extends AppCompatActivity {
         remainingTime.setText("-"+clock(Math.max(0,safeDuration-safePosition)));
     }
 
+    private void cancelWaveformAnalysis() {
+        waveformGeneration++;
+        if (waveformTask != null) waveformTask.cancel(true);
+        waveformTask = null;
+        resumeAfterWaveform = false;
+    }
+
+    private boolean currentWaveformRequest(int generation, Uri uri) {
+        return generation == waveformGeneration && uri.equals(sourceUri)
+                && waveformEnabled && player != null && !isFinishing() && !isDestroyed();
+    }
+
     private void loadWaveform(){
-        if(waveform==null||!waveformEnabled)return;
+        if(waveform==null||!waveformEnabled||player==null||isFinishing()||isDestroyed())return;
+        boolean shouldResume = resumeAfterWaveform;
+        cancelWaveformAnalysis();
+        resumeAfterWaveform = shouldResume;
+        final int generation = waveformGeneration;
         waveform.clearAnalysis();
         waveform.setLoading(true);
         Uri uri=sourceUri;
         long duration=Math.max(0,player.getLength());
         int buckets=(int)Math.max(600,Math.min(72_000,duration/100L));
-        worker.execute(()->AudioWaveformExtractor.extract(this,uri,buckets,new AudioWaveformExtractor.Callback(){
-            public void complete(AudioWaveformExtractor.Result result){runOnUiThread(()->{if(uri.equals(sourceUri)&&waveform!=null&&waveformEnabled){waveform.setLoading(false);waveform.setAnalysis(result);}finishWaveformAnalysis();});}
-            public void failed(){runOnUiThread(()->{if(waveform!=null)waveform.setLoading(false);Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();});}
+        waveformTask = worker.submit(()->AudioWaveformExtractor.extract(this,uri,buckets,new AudioWaveformExtractor.Callback(){
+            public void complete(AudioWaveformExtractor.Result result){runOnUiThread(()->{
+                if (!currentWaveformRequest(generation, uri)) return;
+                waveform.setLoading(false);waveform.setAnalysis(result);finishWaveformAnalysis();
+            });}
+            public void failed(){runOnUiThread(()->{
+                if (!currentWaveformRequest(generation, uri)) return;
+                waveform.setLoading(false);Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();
+            });}
         }));
     }
-    private void finishWaveformAnalysis(){if(resumeAfterWaveform&&player!=null&&!player.isPlaying())player.play();resumeAfterWaveform=false;}
+    private void finishWaveformAnalysis(){if(resumeAfterWaveform&&player!=null&&!playbackEnded&&!player.isPlaying())player.play();resumeAfterWaveform=false;}
 
     private void createFloatingWaveform(){
         waveform=new WaveformView(this);
@@ -614,6 +643,8 @@ public class PlayerActivity extends AppCompatActivity {
     private boolean gesture(MotionEvent e, GestureDetector detector) {
         scaleDetector.onTouchEvent(e);if(locked){detector.onTouchEvent(e);return true;}
         if(e.getPointerCount()>1||scaleDetector.isInProgress()){
+            handler.removeCallbacks(activateHoldSpeed);
+            if(holdSpeedActive)stopHoldSpeed();
             if(e.getActionMasked()==MotionEvent.ACTION_POINTER_DOWN){lastPanTouchX=e.getX(0);lastPanTouchY=e.getY(0);}return true;
         }
         if(zoomScale>1.01f){
@@ -734,7 +765,7 @@ public class PlayerActivity extends AppCompatActivity {
         waveformEnabled=!waveformEnabled;
         preferences.edit().putBoolean(videoKey("waveform_enabled"),waveformEnabled).apply();
         if(waveform==null)return;
-        if(!waveformEnabled){waveform.setVisibility(View.GONE);waveform.clearAnalysis();Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
+        if(!waveformEnabled){boolean shouldResume=resumeAfterWaveform;cancelWaveformAnalysis();if(shouldResume&&player!=null&&!playbackEnded&&!player.isPlaying())player.play();waveform.setVisibility(View.GONE);waveform.clearAnalysis();Toast.makeText(this,"Audio waveform off",Toast.LENGTH_SHORT).show();return;}
         showWaveformOverlay();
         Toast.makeText(this,"Audio waveform on",Toast.LENGTH_SHORT).show();
         resumeAfterWaveform=player.isPlaying();
@@ -955,8 +986,8 @@ public class PlayerActivity extends AppCompatActivity {
     }
     private void createPreviewSheet(){
         Toast.makeText(this,"Creating preview sheet…",Toast.LENGTH_SHORT).show();Uri uri=sourceUri;String displayName=currentTitle();
-        worker.execute(()->{Bitmap sheet=null;try(ParcelFileDescriptor fd=getContentResolver().openFileDescriptor(uri,"r")){
-            if(fd==null)throw new FileNotFoundException();MediaMetadataRetriever r=new MediaMetadataRetriever();r.setDataSource(fd.getFileDescriptor());
+        worker.execute(()->{Bitmap sheet=null;MediaMetadataRetriever r=new MediaMetadataRetriever();try(ParcelFileDescriptor fd=getContentResolver().openFileDescriptor(uri,"r")){
+            if(fd==null)throw new FileNotFoundException();r.setDataSource(fd.getFileDescriptor());
             long durationMs=Long.parseLong(Objects.requireNonNull(r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION))),durationUs=durationMs*1000L;
             String width=r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH),height=r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT);
             long fileSize=queryFileSize(uri);String safeName=displayName.length()>68?displayName.substring(0,65)+"…":displayName;
@@ -965,8 +996,8 @@ public class PlayerActivity extends AppCompatActivity {
             c.drawText("Resolution: "+(width==null?"Unknown":width+" × "+height)+"     Duration: "+clock(durationMs)+"     Size: "+formatBytes(fileSize),22,70,paint);
             paint.setColor(Color.WHITE);paint.setTextSize(22);
             for(int i=0;i<9;i++){long at=durationUs*(i+1)/10;Bitmap frame=r.getFrameAtTime(at,MediaMetadataRetriever.OPTION_CLOSEST_SYNC);if(frame!=null){int x=(i%3)*320,y=100+(i/3)*180;c.drawBitmap(frame,null,new android.graphics.Rect(x,y,x+320,y+180),paint);c.drawText(clock(at/1000),x+8,y+170,paint);frame.recycle();}}
-            r.release();Bitmap result=sheet;runOnUiThread(()->save(result));
-        }catch(Exception error){Log.e(TAG,"Preview failed",error);if(sheet!=null)sheet.recycle();runOnUiThread(()->Toast.makeText(this,"Could not create preview sheet",Toast.LENGTH_LONG).show());}});
+            Bitmap result=sheet;runOnUiThread(()->{if(isFinishing()||isDestroyed())result.recycle();else save(result);});
+        }catch(Exception error){Log.e(TAG,"Preview failed",error);if(sheet!=null)sheet.recycle();runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())Toast.makeText(this,"Could not create preview sheet",Toast.LENGTH_LONG).show();});}finally{try{r.release();}catch(Exception ignored){}}});
     }
     private long queryFileSize(Uri uri){try(android.database.Cursor c=getContentResolver().query(uri,new String[]{OpenableColumns.SIZE},null,null,null)){if(c!=null&&c.moveToFirst())return c.getLong(0);}catch(Exception ignored){}return -1;}
     private String formatBytes(long bytes){if(bytes<0)return "Unknown";if(bytes<1024)return bytes+" B";double value=bytes;String[] units={"B","KB","MB","GB"};int unit=0;while(value>=1024&&unit<units.length-1){value/=1024;unit++;}return String.format(Locale.US,"%.1f %s",value,units[unit]);}
@@ -1110,7 +1141,7 @@ public class PlayerActivity extends AppCompatActivity {
             restorePlayerOverlaysAfterPipFailure();
         }
     }
-    @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null&&player!=null){player.setEqualizer(null);cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
+    @Override protected void onDestroy(){cancelWaveformAnalysis();handler.removeCallbacksAndMessages(null);worker.shutdownNow();try{unregisterReceiver(noisyReceiver);}catch(Exception ignored){}try{unregisterReceiver(playbackReceiver);}catch(Exception ignored){}stopService(new Intent(this,PlaybackService.class));if(Build.VERSION.SDK_INT>=26&&focusRequest!=null)audioManager.abandonAudioFocusRequest(focusRequest);if(cleanupEqualizer!=null&&player!=null){player.setEqualizer(null);cleanupEqualizer=null;}if(player!=null){player.stop();player.detachViews();player.release();player=null;}closeSourceDescriptor();if(vlc!=null){vlc.release();vlc=null;}super.onDestroy();}
     private class GestureLevelView extends View{
         private final Paint levelPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         private float level;
