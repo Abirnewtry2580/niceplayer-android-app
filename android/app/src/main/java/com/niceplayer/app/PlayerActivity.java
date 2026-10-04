@@ -54,7 +54,10 @@ public class PlayerActivity extends AppCompatActivity {
     private WaveformView waveform;
     private GestureLevelView gestureLevel;
     private TextView play, currentTime, totalTime, remainingTime, hint, lock, title, screenshotButton;
-    private TextView rotationLockControl;
+    private TextView rotationLockControl, repeatControl;
+    private static final int REPEAT_OFF = 0, REPEAT_ONE = 1, REPEAT_ALL = 2;
+    private int repeatMode = REPEAT_OFF;
+    private boolean playbackEnded;
     private boolean dragging, controls = true, locked, orientationLocked;
     private boolean privateMode;
     private boolean softwareRetryAttempted;
@@ -101,7 +104,7 @@ public class PlayerActivity extends AppCompatActivity {
     private final ActivityResultLauncher<String[]> subtitlePicker = registerForActivityResult(
             new ActivityResultContracts.OpenDocument(), this::attachExternalSubtitle);
     private final BroadcastReceiver noisyReceiver = new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){if(AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent.getAction())&&player!=null&&player.isPlaying()){player.pause();Toast.makeText(PlayerActivity.this,"Playback paused: headphones disconnected",Toast.LENGTH_LONG).show();}}};
-    private final BroadcastReceiver playbackReceiver=new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){if(player==null)return;String a=intent.getAction();if(PlaybackService.PLAY_PAUSE.equals(a)){if(player.isPlaying())player.pause();else player.play();}else if(PlaybackService.PREVIOUS.equals(a))playAt(playlistIndex-1);else if(PlaybackService.NEXT.equals(a))playAt(playlistIndex+1);}};
+    private final BroadcastReceiver playbackReceiver=new BroadcastReceiver(){@Override public void onReceive(Context context,Intent intent){if(player==null)return;String a=intent.getAction();if(PlaybackService.PLAY_PAUSE.equals(a)){togglePlayback();}else if(PlaybackService.PREVIOUS.equals(a))playAt(playlistIndex-1);else if(PlaybackService.NEXT.equals(a))playAt(playlistIndex+1);}};
     private long downTime;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable hideLockButton = () -> {
@@ -151,6 +154,8 @@ public class PlayerActivity extends AppCompatActivity {
         subtitleStyle = preferences.getInt("subtitle_style", 0);
         headphoneSafety = preferences.getBoolean("headphone_safety", true);
         autoPip = preferences.getBoolean("auto_pip", true);
+        repeatMode = preferences.getInt("repeat_mode", REPEAT_OFF);
+        if (repeatMode < REPEAT_OFF || repeatMode > REPEAT_ALL) repeatMode = REPEAT_OFF;
         // Waveform is scoped to the current video and persists independently.
         waveformEnabled = preferences.getBoolean(videoKey("waveform_enabled"), false);
         orientationLocked = preferences.contains(videoKey("orientation_locked"))
@@ -183,7 +188,7 @@ public class PlayerActivity extends AppCompatActivity {
             else if (e.type == MediaPlayer.Event.Paused) showControls(false);
             else if (e.type == MediaPlayer.Event.EndReached) {
                 if (!playbackStartedForItem) handlePlaybackError();
-                else playAt(playlistIndex + 1);
+                else onPlaybackEnded();
             }
         }));
         applyVideoOrientation();
@@ -310,7 +315,7 @@ public class PlayerActivity extends AppCompatActivity {
     private void attachExternalSubtitle(Uri uri){if(uri==null||player==null)return;try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);boolean ok=player.addSlave(IMedia.Slave.Type.Subtitle,uri,true);Toast.makeText(this,ok?"External subtitle added":"Could not add subtitle",Toast.LENGTH_LONG).show();}catch(Exception e){Log.e(TAG,"Subtitle attach failed",e);Toast.makeText(this,"Could not add subtitle",Toast.LENGTH_LONG).show();}}
 
     private void savePosition() {
-        if (player == null || sourceUri == null) return;
+        if (player == null || sourceUri == null || playbackEnded) return;
         long at = player.getTime(), length = player.getLength();
         SharedPreferences.Editor edit = preferences.edit();
         if (at > 5000 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
@@ -318,7 +323,7 @@ public class PlayerActivity extends AppCompatActivity {
         edit.apply();
     }
     private void savePositionImmediately() {
-        if (player == null || sourceUri == null) return;
+        if (player == null || sourceUri == null || playbackEnded) return;
         long at = player.getTime(), length = player.getLength();
         SharedPreferences.Editor edit = preferences.edit();
         if (at > 0 && (length <= 0 || at < length - 10000)) edit.putLong(positionKey(), at);
@@ -328,13 +333,82 @@ public class PlayerActivity extends AppCompatActivity {
     private void recordHistory(){String uri=sourceUri.toString(),name=currentTitle();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();uris.add(uri);names.add(name);for(int i=0;i<12;i++){String old=preferences.getString("history_uri_"+i,null);if(old!=null&&!old.equals(uri)){uris.add(old);names.add(preferences.getString("history_name_"+i,"Video"));if(uris.size()==12)break;}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
     private void forgetCurrentVideo(){if(preferences==null||sourceUri==null)return;String hiddenUri=sourceUri.toString();ArrayList<String> uris=new ArrayList<>(),names=new ArrayList<>();for(int i=0;i<12;i++){String uri=preferences.getString("history_uri_"+i,null);if(uri!=null&&!uri.equals(hiddenUri)){uris.add(uri);names.add(preferences.getString("history_name_"+i,"Video"));}}SharedPreferences.Editor e=preferences.edit();for(int i=0;i<12;i++){if(i<uris.size()){e.putString("history_uri_"+i,uris.get(i));e.putString("history_name_"+i,names.get(i));}else{e.remove("history_uri_"+i);e.remove("history_name_"+i);}}e.apply();}
 
+    private void togglePlayback() {
+        if (player == null) return;
+        if (playbackEnded) restartCurrentVideo();
+        else if (player.isPlaying()) player.pause();
+        else player.play();
+    }
+
+    private void restartCurrentVideo() {
+        handler.removeCallbacks(activateHoldSpeed);
+        if (holdSpeedActive) stopHoldSpeed();
+        playbackEnded = false;
+        playbackStartedForItem = false;
+        positionRestoredForItem = false;
+        pendingSeek = 0;
+        lastPositionSave = 0;
+        player.stop();
+        if (!startPlayback(!softwareRetryAttempted, directUriRetryAttempted)) {
+            playbackEnded = true;
+            showControls(false);
+            Toast.makeText(this, "Could not restart this video", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void onPlaybackEnded() {
+        playbackEnded = true;
+        preferences.edit().remove(positionKey()).apply();
+        if (repeatMode == REPEAT_ONE) {
+            restartCurrentVideo();
+        } else if (playlistIndex + 1 < playlistUris.size()) {
+            playAt(playlistIndex + 1, repeatMode == REPEAT_ALL);
+        } else if (repeatMode == REPEAT_ALL) {
+            if (playlistUris.size() == 1) restartCurrentVideo();
+            else {
+                playAt(0, true);
+            }
+        } else {
+            handler.removeCallbacks(activateHoldSpeed);
+            if (holdSpeedActive) stopHoldSpeed();
+            play.setText("▶");
+            showControls(false);
+        }
+    }
+
+    private void repeatMenu() {
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Video repeat")
+                .setSingleChoiceItems(new String[]{"Off", "Repeat One", "Repeat All"}, repeatMode, (dialog, mode) -> {
+                    repeatMode = mode;
+                    preferences.edit().putInt("repeat_mode", mode).apply();
+                    updateRepeatControl();
+                    dialog.dismiss();
+                    scheduleControlsHide();
+                }).show();
+    }
+
+    private void updateRepeatControl() {
+        if (repeatControl == null) return;
+        repeatControl.setText(repeatMode == REPEAT_ONE ? "⇄₁" : "⇄");
+        repeatControl.setTextColor(repeatMode == REPEAT_OFF ? Color.WHITE : 0xFF60A5FA);
+        repeatControl.setContentDescription("Video repeat: " +
+                (repeatMode == REPEAT_ONE ? "Repeat One" : repeatMode == REPEAT_ALL ? "Repeat All" : "Off"));
+    }
+
     private void playAt(int index) {
+        playAt(index, false);
+    }
+
+    private void playAt(int index, boolean fromBeginning) {
         handler.removeCallbacks(activateHoldSpeed); if(holdSpeedActive)stopHoldSpeed();
         if (index < 0 || index >= playlistUris.size()) {
             Toast.makeText(this, index < 0 ? "This is the first video" : "Playlist finished", Toast.LENGTH_SHORT).show();
             return;
         }
-        savePosition();
+        if (!playbackEnded) savePosition();
+        playbackEnded = false;
+        pendingSeek = fromBeginning ? 0 : -1;
         playlistIndex = index;
         sourceUri = Uri.parse(playlistUris.get(index));
         orientationLocked=preferences.getBoolean(videoKey("orientation_locked"),false);
@@ -363,7 +437,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         GestureDetector detector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override public boolean onSingleTapConfirmed(MotionEvent e) { toggleControls(); return true; }
-            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked && player != null) { handler.removeCallbacks(activateHoldSpeed); if (holdSpeedActive) stopHoldSpeed(); float x=e.getX(), w=root.getWidth(); if(x < w/3f) jump(-TEN_SECONDS); else if(x > w*2f/3f) jump(TEN_SECONDS); else { if(player.isPlaying()) player.pause(); else player.play(); } } return true; }
+            @Override public boolean onDoubleTap(MotionEvent e) { if (!locked && player != null) { handler.removeCallbacks(activateHoldSpeed); if (holdSpeedActive) stopHoldSpeed(); float x=e.getX(), w=root.getWidth(); if(x < w/3f) jump(-TEN_SECONDS); else if(x > w*2f/3f) jump(TEN_SECONDS); else togglePlayback(); } return true; }
         });
         scaleDetector=new ScaleGestureDetector(this,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
             @Override public boolean onScale(ScaleGestureDetector d){
@@ -394,6 +468,7 @@ public class PlayerActivity extends AppCompatActivity {
         TextView speed=topCircle("1×",15); speed.setOnClickListener(v->speedMenu(speed)); top.addView(speed,topButtonParams(46));
         TextView ratio=topCircle("FIT",11); ratio.setOnClickListener(v->ratio(ratio)); top.addView(ratio,topButtonParams(46));
         TextView rotate=topCircle("↻",25); rotate.setOnClickListener(v->rotate()); top.addView(rotate,topButtonParams(46));
+        repeatControl=topCircle("⇄",25); repeatControl.setOnClickListener(v->repeatMenu()); top.addView(repeatControl,topButtonParams(40)); updateRepeatControl();
         TextView more=topCircle("⋮",26); more.setOnClickListener(v->moreMenu(more)); top.addView(more,topButtonParams(46));
         root.addView(top,new FrameLayout.LayoutParams(-1,dp(60),Gravity.TOP));
     }
@@ -424,7 +499,7 @@ public class PlayerActivity extends AppCompatActivity {
         }); bottom.addView(seek,new LinearLayout.LayoutParams(-1,dp(30)));
         LinearLayout row=new LinearLayout(this); row.setGravity(Gravity.CENTER);
         addControl(row,"|◀",21,v->playAt(playlistIndex-1),48); addControl(row,"↶ 10",18,v->jump(-TEN_SECONDS),48);
-        play=addControl(row,"▶",31,v->{if(player.isPlaying())player.pause();else player.play();},58);
+        play=addControl(row,"▶",31,v->{togglePlayback();},58);
         addControl(row,"10 ↷",18,v->jump(TEN_SECONDS),48);
         addControl(row,"▶|",21,v->playAt(playlistIndex+1),48);
         FrameLayout controlsLayer=new FrameLayout(this);controlsLayer.addView(row,new FrameLayout.LayoutParams(-2,dp(55),Gravity.CENTER));
