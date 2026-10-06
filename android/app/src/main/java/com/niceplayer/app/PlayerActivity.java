@@ -466,7 +466,7 @@ public class PlayerActivity extends AppCompatActivity {
         screenshotButton = topCircle("📷", 23);
         screenshotButton.setBackgroundColor(Color.TRANSPARENT);screenshotButton.setAlpha(.5f);screenshotButton.setContentDescription("Take screenshot");screenshotButton.setOnClickListener(v->screenshot());
         FrameLayout.LayoutParams screenshotParams=new FrameLayout.LayoutParams(dp(48),dp(48),Gravity.END|Gravity.CENTER_VERTICAL);screenshotParams.rightMargin=dp(18);root.addView(screenshotButton,screenshotParams);
-        centerTimeFeedback=label("",16);centerTimeFeedback.setPadding(dp(14),dp(8),dp(14),dp(8));centerTimeFeedback.setTextColor(Color.WHITE);centerTimeFeedback.setShadowLayer(dp(1.5f),0,0,Color.BLACK);centerTimeFeedback.setVisibility(View.GONE);
+        centerTimeFeedback=label("",16);centerTimeFeedback.setPadding(dp(14),dp(8),dp(14),dp(8));centerTimeFeedback.setTextColor(Color.WHITE);centerTimeFeedback.setShadowLayer(dp(2),0,0,Color.BLACK);centerTimeFeedback.setVisibility(View.GONE);
         GradientDrawable feedbackBg=new GradientDrawable();feedbackBg.setColor(0xB8000000);feedbackBg.setCornerRadius(dp(12));feedbackBg.setStroke(dp(1),0xAFFFFFFF);centerTimeFeedback.setBackground(feedbackBg);
         root.addView(centerTimeFeedback,new FrameLayout.LayoutParams(-2,-2,Gravity.CENTER));
         setContentView(root);
@@ -476,7 +476,7 @@ public class PlayerActivity extends AppCompatActivity {
         top = new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(dp(5),dp(5),dp(5),dp(5)); top.setBackgroundColor(Color.TRANSPARENT);
         TextView back=topCircle("‹",34); back.setOnClickListener(v->finish()); top.addView(back,topButtonParams(46));
         title=label(currentTitle(),15); if(title.getText().toString().trim().isEmpty())title.setText("Video");
-        title.setShadowLayer(dp(1.2f),0,0,Color.BLACK);title.setGravity(Gravity.START|Gravity.CENTER_VERTICAL); title.setSingleLine(true); title.setEllipsize(android.text.TextUtils.TruncateAt.END); top.addView(title,new LinearLayout.LayoutParams(0,dp(50),1));
+        title.setShadowLayer(dp(1),0,0,Color.BLACK);title.setGravity(Gravity.START|Gravity.CENTER_VERTICAL); title.setSingleLine(true); title.setEllipsize(android.text.TextUtils.TruncateAt.END); top.addView(title,new LinearLayout.LayoutParams(0,dp(50),1));
         TextView speed=topCircle("1×",15); speed.setOnClickListener(v->speedMenu(speed)); top.addView(speed,topButtonParams(46));
         TextView ratio=topCircle("FIT",11); ratio.setOnClickListener(v->ratio(ratio)); top.addView(ratio,topButtonParams(46));
         TextView rotate=topCircle("↻",25); rotate.setOnClickListener(v->rotate()); top.addView(rotate,topButtonParams(46));
@@ -484,7 +484,7 @@ public class PlayerActivity extends AppCompatActivity {
         TextView more=topCircle("⋮",26); more.setOnClickListener(v->moreMenu(more)); top.addView(more,topButtonParams(46));
         root.addView(top,new FrameLayout.LayoutParams(-1,dp(60),Gravity.TOP));
     }
-    private TextView topCircle(String text,int size){TextView view=label(text,size);view.setShadowLayer(dp(1.2f),0,0,Color.BLACK);view.setBackgroundColor(Color.TRANSPARENT);view.setOnTouchListener((v,e)->{if(e.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});return view;}
+    private TextView topCircle(String text,int size){TextView view=label(text,size);view.setShadowLayer(dp(1),0,0,Color.BLACK);view.setBackgroundColor(Color.TRANSPARENT);view.setOnTouchListener((v,e)->{if(e.getActionMasked()==MotionEvent.ACTION_DOWN)showControls(false);else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL)scheduleControlsHide();return false;});return view;}
     private LinearLayout.LayoutParams topButtonParams(int size){LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(dp(size),dp(size));params.setMargins(dp(3),0,dp(3),0);return params;}
 
     private void makeQuickTools(){android.widget.HorizontalScrollView scroll=new android.widget.HorizontalScrollView(this);scroll.setHorizontalScrollBarEnabled(false);scroll.setBackgroundColor(Color.TRANSPARENT);quickTools=new LinearLayout(this);quickTools.setGravity(Gravity.CENTER_VERTICAL);quickTools.setPadding(dp(8),dp(5),dp(8),dp(5));
