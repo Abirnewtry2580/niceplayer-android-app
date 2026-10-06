@@ -6,6 +6,7 @@ import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.net.Uri;
+import android.os.SystemClock;
 import android.util.Log;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -19,23 +20,32 @@ final class AudioWaveformExtractor {
         final boolean[] speech;
         Result(float[] levels, boolean[] speech) { this.levels = levels; this.speech = speech; }
     }
-    interface Callback { void complete(Result result); void failed(); }
+    interface Callback {
+        void progress(int percent, long remainingMs);
+        void complete(Result result);
+        void failed();
+    }
 
     static void extract(Context context, Uri uri, int buckets, Callback callback) {
         if (uri == null || buckets < 1) { callback.failed(); return; }
+        Progress progress = new Progress(callback);
         try {
-            callback.complete(decodePcm(context, uri, buckets));
+            callback.complete(decodePcm(context, uri, buckets, progress));
+            progress.complete();
+            return;
         } catch (Exception decodeError) {
             if (Thread.currentThread().isInterrupted()) return;
             Log.w(TAG, "PCM waveform unavailable; using encoded-audio fallback", decodeError);
-            try { callback.complete(envelopeOnly(readEncodedEnvelope(context, uri, buckets))); }
+            progress.beginStage();
+            try { callback.complete(envelopeOnly(readEncodedEnvelope(context, uri, buckets, progress))); progress.complete(); return; }
             catch (Exception packetError) {
                 if (Thread.currentThread().isInterrupted()) return;
                 // Some containers are playable by VLC but not understood by MediaExtractor.
                 // A final streaming envelope keeps the timeline usable without loading the
                 // whole movie into memory.
                 Log.w(TAG, "Audio packets unavailable; using container fallback", packetError);
-                try { callback.complete(envelopeOnly(readContainerEnvelope(context, uri, buckets))); }
+                progress.beginStage();
+                try { callback.complete(envelopeOnly(readContainerEnvelope(context, uri, buckets, progress))); progress.complete(); return; }
                 catch (Exception fallbackError) {
                     if (Thread.currentThread().isInterrupted()) return;
                     Log.e(TAG, "Waveform extraction failed for " + uri, fallbackError);
@@ -45,7 +55,7 @@ final class AudioWaveformExtractor {
         }
     }
 
-    private static Result decodePcm(Context context, Uri uri, int buckets) throws Exception {
+    private static Result decodePcm(Context context, Uri uri, int buckets, Progress progress) throws Exception {
         MediaExtractor extractor = new MediaExtractor(); MediaCodec codec = null;
         try {
             Track track = selectAudioTrack(extractor, context, uri);
@@ -83,6 +93,7 @@ final class AudioWaveformExtractor {
                         frames[bucket]++;
                     }
                     outputDone = (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
+                    progress.report(info.presentationTimeUs, track.durationUs);
                     codec.releaseOutputBuffer(index, false);
                 }
             }
@@ -94,7 +105,7 @@ final class AudioWaveformExtractor {
         }
     }
 
-    private static float[] readEncodedEnvelope(Context context, Uri uri, int buckets) throws Exception {
+    private static float[] readEncodedEnvelope(Context context, Uri uri, int buckets, Progress progress) throws Exception {
         MediaExtractor extractor = new MediaExtractor();
         try {
             Track track = selectAudioTrack(extractor, context, uri); float[] peaks = new float[buckets];
@@ -107,17 +118,28 @@ final class AudioWaveformExtractor {
                 float level = count == 0 ? 0 : sum / (count * 128f);
                 int bucket = bucket(Math.max(0, extractor.getSampleTime()), track.durationUs, buckets);
                 peaks[bucket] = Math.max(peaks[bucket], level);
+                progress.report(Math.max(0, extractor.getSampleTime()), track.durationUs);
                 if (!extractor.advance()) break;
             }
             return normalize(peaks);
         } finally { extractor.release(); }
     }
 
-    private static float[] readContainerEnvelope(Context context, Uri uri, int buckets) throws Exception {
+    private static float[] readContainerEnvelope(Context context, Uri uri, int buckets, Progress progress) throws Exception {
         float[] peaks = new float[buckets]; byte[] buffer = new byte[64 * 1024]; int bucket = 0;
+        long totalBytes = -1;
+        try (android.database.Cursor cursor = context.getContentResolver().query(uri,
+                new String[]{android.provider.OpenableColumns.SIZE}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) totalBytes = cursor.getLong(0);
+        } catch (Exception ignored) {}
+        if (totalBytes <= 0) {
+            try (android.content.res.AssetFileDescriptor descriptor = context.getContentResolver().openAssetFileDescriptor(uri, "r")) {
+                if (descriptor != null && descriptor.getLength() > 0) totalBytes = descriptor.getLength();
+            } catch (Exception ignored) {}
+        }
         try (InputStream input = context.getContentResolver().openInputStream(uri)) {
             if (input == null) throw new IllegalStateException("Cannot open media stream");
-            int read;
+            int read; long bytesRead = 0;
             while ((read = input.read(buffer)) >= 0) {
                 checkCancelled();
                 if (read == 0) continue;
@@ -125,6 +147,8 @@ final class AudioWaveformExtractor {
                 for (int i = 0; i < read; i += step) { sum += Math.abs((int)buffer[i]); count++; }
                 peaks[bucket % buckets] = Math.max(peaks[bucket % buckets], count == 0 ? 0 : sum / (count * 128f));
                 bucket++;
+                bytesRead += read;
+                if (totalBytes > 0) progress.report(bytesRead, totalBytes);
             }
         }
         if (bucket == 0) throw new IllegalStateException("Empty media stream");
@@ -133,6 +157,28 @@ final class AudioWaveformExtractor {
 
     private static void checkCancelled() throws InterruptedException {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedException("Waveform cancelled");
+    }
+
+    private static final class Progress {
+        private final Callback callback;
+        private long stageStarted = SystemClock.elapsedRealtime();
+        private long lastUpdate;
+        private int lastPercent = -1;
+        Progress(Callback callback) { this.callback = callback; }
+        void beginStage() { stageStarted = SystemClock.elapsedRealtime(); lastUpdate = 0; lastPercent = -1; callback.progress(0, -1); }
+        void report(long position, long duration) { if (duration > 0) report(position / (double) duration); }
+        void report(double fraction) {
+            if (callback == null) return;
+            double safe = Math.max(0, Math.min(.99, fraction));
+            int percent = (int) Math.floor(safe * 100);
+            long now = SystemClock.elapsedRealtime();
+            if (percent == lastPercent && now - lastUpdate < 400) return;
+            long elapsed = Math.max(0, now - stageStarted);
+            long remaining = safe > .005 ? (long) (elapsed * (1.0 - safe) / safe) : -1;
+            lastPercent = percent; lastUpdate = now;
+            callback.progress(percent, remaining);
+        }
+        void complete() { if (callback != null) callback.progress(100, 0); }
     }
 
     private static Track selectAudioTrack(MediaExtractor extractor, Context context, Uri uri) throws Exception {

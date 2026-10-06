@@ -150,11 +150,15 @@
         .video-row { display:flex; align-items:center; gap:12px; padding:11px; border:1px solid rgba(255,255,255,.08); border-radius:16px; background:rgba(15,23,42,.72); }
         .video-thumb { position:relative; width:112px; height:68px; flex:none; display:grid; place-items:center; overflow:hidden; border-radius:10px; color:#67e8f9; background:linear-gradient(145deg,#172554,#312e81); }
         .video-thumb img { width:100%; height:100%; object-fit:cover; }
-        .thumb-duration { position:absolute; right:4px; bottom:4px; padding:2px 5px; border-radius:4px; background:rgba(0,0,0,.82); color:#fff; font-size:9px; font-weight:700; }
         .thumb-new { position:absolute; z-index:2; right:4px; top:4px; padding:3px 7px; border-radius:999px; background:linear-gradient(135deg,#22d3ee,#0284c7); color:#fff; box-shadow:0 2px 9px rgba(34,211,238,.38); font-size:8px; font-weight:900; letter-spacing:.7px; }
         .video-info { flex:1; min-width:0; }
         .video-name { font-size:12px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .video-duration { color:#c4b5fd; font-size:9px; margin-top:3px; white-space:nowrap; }
         .video-meta { color:#94a3b8; font-size:10px; margin-top:5px; }
+        .video-progress { margin-top:5px; min-width:0; }
+        .video-progress-label { display:block; color:#cbd5e1; font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .video-progress-track { height:3px; margin-top:3px; border-radius:99px; background:rgba(148,163,184,.23); overflow:hidden; }
+        .video-progress-fill { height:100%; border-radius:inherit; background:linear-gradient(90deg,#22d3ee,#60a5fa); }
         .folder-grid.view-detailed { grid-template-columns:1fr; }
         .folder-grid.view-detailed .folder-card { min-height:82px; padding:13px 58px 13px 66px; }
         .folder-grid.view-detailed .folder-icon { position:absolute; left:13px; top:13px; margin:0; }
@@ -165,7 +169,8 @@
         .video-list.view-compact { gap:5px; }
         .video-list.view-compact .video-row { padding:7px; border-radius:11px; }
         .video-list.view-compact .video-thumb { width:76px; height:46px; }
-        .video-list.view-compact .video-meta { display:none; }
+        .video-list.view-compact .video-meta { display:block; font-size:9px; }
+        .video-list.view-compact .video-progress-label { font-size:8px; }
         .video-list.view-grid { display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
         .video-list.view-grid .video-row { display:block; padding:8px; }
         .video-list.view-grid .video-thumb { width:100%; height:auto; aspect-ratio:16/9; margin-bottom:8px; }
@@ -416,6 +421,7 @@
         const deviceVideoList = document.getElementById('deviceVideoList');
         const libraryEmpty = document.getElementById('libraryEmpty');
         let deviceFolders = [], visibleDeviceVideos = [], hiddenFolderGroups = [], currentFolder = null, currentFolderIsHidden = false, showHiddenOnly = false;
+        let playbackHistoryByUri = new Map();
         let libraryView = localStorage.getItem('library_view') || 'detailed';
 
         function storedList(key){try{const value=JSON.parse(localStorage.getItem(key)||'[]');return Array.isArray(value)?value:[];}catch(error){return [];}}
@@ -579,13 +585,20 @@
                 row.dataset.uri=item.uri;
                 const thumb = document.createElement('div'); thumb.className = 'video-thumb';
                 thumb.textContent = '▶';
-                if (item.duration) { const badge = document.createElement('span'); badge.className = 'thumb-duration'; badge.textContent = formatTime(item.duration / 1000); thumb.appendChild(badge); }
                 if (isNewDownloadedVideo(item)) { const badge = document.createElement('span'); badge.className = 'thumb-new'; badge.textContent = 'NEW'; thumb.appendChild(badge); }
                 const info = document.createElement('div'); info.className = 'video-info';
                 const name = document.createElement('div'); name.className = 'video-name'; name.textContent = item.name;
-                const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size) + (item.duration ? ' · ' + formatTime(item.duration / 1000) : '')+(duplicateCount[item.name+'|'+item.size]>1?' · Possible duplicate':'');
+                const duration = document.createElement('div'); duration.className = 'video-duration'; duration.textContent = '◷  ' + formatTime((item.duration||0) / 1000);
+                const meta = document.createElement('div'); meta.className = 'video-meta'; meta.textContent = humanSize(item.size)+(duplicateCount[item.name+'|'+item.size]>1?' · Possible duplicate':'');
+                const progress = document.createElement('div'); progress.className='video-progress';
+                const progressLabel=document.createElement('span');progressLabel.className='video-progress-label';
+                const progressTrack=document.createElement('div');progressTrack.className='video-progress-track';
+                const progressFill=document.createElement('div');progressFill.className='video-progress-fill';progressTrack.appendChild(progressFill);progress.append(progressLabel,progressTrack);
+                const history=playbackHistoryByUri.get(item.uri),lastPosition=history?Math.max(0,Math.min(Number(history.position)||0,Number(item.duration)||Infinity)):0,totalDuration=Math.max(0,Number(item.duration)||0);
+                progressLabel.textContent=(history&&lastPosition>0?'Last played: ':'Not played · ')+formatTime(lastPosition/1000)+' / '+formatTime(totalDuration/1000);
+                progressFill.style.width=(totalDuration>0?Math.min(100,lastPosition/totalDuration*100):0)+'%';
                 const menu=document.createElement('button');menu.className='item-menu';menu.textContent='⋮';menu.addEventListener('click',event=>{event.stopPropagation();showMediaActions('video',item);});
-                info.append(name, meta); row.append(thumb, info,menu);
+                info.append(name,duration,meta,progress); row.append(thumb, info,menu);
                 row.addEventListener('click', async () => {
                     markVideoPlayed(item.uri);
                     const newBadge=thumb.querySelector('.thumb-new');if(newBadge)newBadge.remove();
@@ -692,7 +705,33 @@
         }
         function toggleFolderFavorite(id){let values=storedList('favorite_folders');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('favorite_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
         function toggleFolderHidden(id){let values=storedList('hidden_folders');values=values.includes(id)?values.filter(x=>x!==id):[...values,id];localStorage.setItem('hidden_folders',JSON.stringify(values));renderFolderCards(deviceFolders);}
-        async function loadPlaybackHistory(){const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');if(!plugin||!plugin.getHistory)return;try{const result=await plugin.getHistory(),allItems=result.items||[],hiddenUris=[];const items=allItems.filter(item=>{const dotHidden=String(item.bucketName||'').trim().startsWith('.'),videoHidden=isHidden('video',{uri:item.uri,name:item.fileName||item.name,dotHidden,isDownloading:false}),folderHidden=item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||'',dotHidden,hasRunningDownloads:false});if(videoHidden||folderHidden){hiddenUris.push(item.uri);return false;}return true;});if(hiddenUris.length&&plugin.removeHistory)await plugin.removeHistory({uris:hiddenUris});items.forEach(item=>markVideoPlayed(item.uri));if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>{plugin.playVideo({uri:item.uri,title:item.name,privateMode:false,index:0,uris:[item.uri],titles:[item.name]});};strip.appendChild(card);});}catch(error){}}
+        async function loadPlaybackHistory(){
+            const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');
+            if(!plugin||!plugin.getHistory)return;
+            try{
+                const result=await plugin.getHistory(),allItems=result.items||[],hiddenUris=[];
+                playbackHistoryByUri=new Map(allItems.map(item=>[item.uri,item]));
+                deviceVideoList.querySelectorAll('.video-row').forEach(row=>{
+                    const video=visibleDeviceVideos.find(item=>item.uri===row.dataset.uri),history=playbackHistoryByUri.get(row.dataset.uri);
+                    if(!video)return;
+                    const position=history?Math.max(0,Math.min(Number(history.position)||0,Number(video.duration)||Infinity)):0;
+                    const label=row.querySelector('.video-progress-label'),fill=row.querySelector('.video-progress-fill');
+                    if(label)label.textContent=(history&&position>0?'Last played: ':'Not played · ')+formatTime(position/1000)+' / '+formatTime((video.duration||0)/1000);
+                    if(fill)fill.style.width=(video.duration?Math.min(100,position/video.duration*100):0)+'%';
+                });
+                const items=allItems.filter(item=>{
+                    const dotHidden=String(item.bucketName||'').trim().startsWith('.');
+                    const videoHidden=isHidden('video',{uri:item.uri,name:item.fileName||item.name,dotHidden,isDownloading:false});
+                    const folderHidden=item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||'',dotHidden,hasRunningDownloads:false});
+                    if(videoHidden||folderHidden){hiddenUris.push(item.uri);return false;}return true;
+                });
+                if(hiddenUris.length&&plugin.removeHistory)await plugin.removeHistory({uris:hiddenUris});
+                items.forEach(item=>markVideoPlayed(item.uri));
+                if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}
+                strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';
+                items.forEach(item=>{const card=document.createElement('button');card.className='history-card';card.innerHTML='<div class="history-name"></div><div class="video-meta">'+(item.position?formatTime(item.position/1000)+' watched':'Recently played')+'</div>';card.querySelector('.history-name').textContent=item.name;card.onclick=()=>{plugin.playVideo({uri:item.uri,title:item.name,privateMode:false,index:0,uris:[item.uri],titles:[item.name]});};strip.appendChild(card);});
+            }catch(error){}
+        }
 
         function setVideoSource(url) {
             if (activeVideoUrl) URL.revokeObjectURL(activeVideoUrl);
