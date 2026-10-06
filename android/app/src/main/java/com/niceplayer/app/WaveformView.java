@@ -21,7 +21,6 @@ public class WaveformView extends View {
     private long durationMs;
     private boolean loading;
     private int loadingPercent;
-    private long remainingMs = -1;
 
     public WaveformView(Context context) { super(context); init(); }
     public WaveformView(Context context, AttributeSet attrs) { super(context, attrs); init(); }
@@ -36,9 +35,9 @@ public class WaveformView extends View {
         invalidate();
     }
 
-    public void clearAnalysis() { loading=false; loadingPercent=0; remainingMs=-1; setAnalysis(null); }
-    public void setLoading(boolean value) { loading=value; if(value){loadingPercent=0;remainingMs=-1;} invalidate(); }
-    public void setLoadingProgress(int percent,long etaMs){loadingPercent=Math.max(0,Math.min(100,percent));remainingMs=etaMs;invalidate();}
+    public void clearAnalysis() { loading=false; loadingPercent=0; setAnalysis(null); }
+    public void setLoading(boolean value) { loading=value; if(value){loadingPercent=0;} invalidate(); }
+    public void setLoadingProgress(int percent,long ignoredEtaMs){loadingPercent=Math.max(0,Math.min(100,percent));invalidate();}
 
     public void setTimeline(long position, long duration) {
         positionMs = Math.max(0, position);
@@ -55,10 +54,7 @@ public class WaveformView extends View {
             if(loading){
                 paint.setStyle(Paint.Style.FILL);paint.setTextAlign(Paint.Align.CENTER);
                 paint.setTextSize(11*getResources().getDisplayMetrics().density);paint.setColor(Color.WHITE);
-                canvas.drawText("Waveform loading  ·  "+loadingPercent+"%",width/2f,centerY-3,paint);
-                paint.setTextSize(10*getResources().getDisplayMetrics().density);
-                String finish=remainingMs<0?"Calculating finish time…":"Calculated finish: "+formatFinishTime(System.currentTimeMillis()+remainingMs);
-                canvas.drawText(finish,width/2f,centerY+13,paint);
+                canvas.drawText("Waveform loading  ·  "+loadingPercent+"%",width/2f,centerY+3,paint);
                 float pad=10*getResources().getDisplayMetrics().density,trackY=height-9*getResources().getDisplayMetrics().density;
                 paint.setColor(0x665B6472);paint.setStrokeWidth(3*getResources().getDisplayMetrics().density);paint.setStrokeCap(Paint.Cap.ROUND);canvas.drawLine(pad,trackY,width-pad,trackY,paint);
                 paint.setColor(0xFF19E6C1);canvas.drawLine(pad,trackY,pad+(width-2*pad)*loadingPercent/100f,trackY,paint);
@@ -104,7 +100,6 @@ public class WaveformView extends View {
         }
     }
 
-    private String formatFinishTime(long epochMs){return new java.text.SimpleDateFormat("HH:mm:ss",java.util.Locale.getDefault()).format(new java.util.Date(epochMs));}
 
     private boolean speechAt(long timeMs) {
         if (timeMs < 0 || timeMs > durationMs || speech.length == 0) return false;
