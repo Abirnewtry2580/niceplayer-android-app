@@ -161,20 +161,27 @@ final class AudioWaveformExtractor {
 
     private static final class Progress {
         private final Callback callback;
-        private long stageStarted = SystemClock.elapsedRealtime();
         private long lastUpdate;
         private int lastPercent = -1;
+        private long lastRateAt = SystemClock.elapsedRealtime();
+        private double lastRateFraction;
+        private double fractionPerMs;
         Progress(Callback callback) { this.callback = callback; }
-        void beginStage() { stageStarted = SystemClock.elapsedRealtime(); lastUpdate = 0; lastPercent = -1; callback.progress(0, -1); }
+        void beginStage() { lastRateAt=SystemClock.elapsedRealtime();lastUpdate=0;lastPercent=-1;lastRateFraction=0;fractionPerMs=0;callback.progress(0,-1); }
         void report(long position, long duration) { if (duration > 0) report(position / (double) duration); }
         void report(double fraction) {
             if (callback == null) return;
             double safe = Math.max(0, Math.min(.99, fraction));
             int percent = (int) Math.floor(safe * 100);
             long now = SystemClock.elapsedRealtime();
+            long rateWindow=Math.max(1,now-lastRateAt);
+            if(safe>lastRateFraction){
+                double measured=(safe-lastRateFraction)/rateWindow;
+                fractionPerMs=fractionPerMs==0?measured:(fractionPerMs*.35)+(measured*.65);
+                lastRateFraction=safe;lastRateAt=now;
+            }
             if (percent == lastPercent && now - lastUpdate < 400) return;
-            long elapsed = Math.max(0, now - stageStarted);
-            long remaining = safe > .005 ? (long) (elapsed * (1.0 - safe) / safe) : -1;
+            long remaining = fractionPerMs > 0 ? (long) ((1.0 - safe) / fractionPerMs) : -1;
             lastPercent = percent; lastUpdate = now;
             callback.progress(percent, remaining);
         }

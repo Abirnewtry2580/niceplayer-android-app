@@ -54,9 +54,11 @@ public class WaveformView extends View {
         if (levels.length == 0 || durationMs <= 0) {
             if(loading){
                 paint.setStyle(Paint.Style.FILL);paint.setTextAlign(Paint.Align.CENTER);
-                paint.setTextSize(12*getResources().getDisplayMetrics().density);paint.setColor(Color.WHITE);
-                String eta=remainingMs<0?"estimating time":"~"+formatEta(remainingMs)+" left";
-                canvas.drawText("Waveform  "+loadingPercent+"%  ·  "+eta,width/2f,centerY+4,paint);
+                paint.setTextSize(11*getResources().getDisplayMetrics().density);paint.setColor(Color.WHITE);
+                canvas.drawText("Waveform loading  ·  "+loadingPercent+"%",width/2f,centerY-3,paint);
+                paint.setTextSize(10*getResources().getDisplayMetrics().density);
+                String finish=remainingMs<0?"Calculating finish time…":"Calculated finish: "+formatFinishTime(System.currentTimeMillis()+remainingMs);
+                canvas.drawText(finish,width/2f,centerY+13,paint);
                 float pad=10*getResources().getDisplayMetrics().density,trackY=height-9*getResources().getDisplayMetrics().density;
                 paint.setColor(0x665B6472);paint.setStrokeWidth(3*getResources().getDisplayMetrics().density);paint.setStrokeCap(Paint.Cap.ROUND);canvas.drawLine(pad,trackY,width-pad,trackY,paint);
                 paint.setColor(0xFF19E6C1);canvas.drawLine(pad,trackY,pad+(width-2*pad)*loadingPercent/100f,trackY,paint);
@@ -102,7 +104,7 @@ public class WaveformView extends View {
         }
     }
 
-    private String formatEta(long ms){long seconds=Math.max(0,(ms+999)/1000);if(seconds<60)return seconds+"s";long minutes=seconds/60;return minutes+"m "+(seconds%60)+"s";}
+    private String formatFinishTime(long epochMs){return new java.text.SimpleDateFormat("HH:mm:ss",java.util.Locale.getDefault()).format(new java.util.Date(epochMs));}
 
     private boolean speechAt(long timeMs) {
         if (timeMs < 0 || timeMs > durationMs || speech.length == 0) return false;
