@@ -811,13 +811,116 @@ public class PlayerActivity extends AppCompatActivity {
 
     private void showWaveformCacheStats(){
         WaveformCache.Stats stats=WaveformCache.stats(this);
-        String message="Saved waveforms: "+stats.count+"\nInternal storage used: "+formatBytes(stats.bytes);
+        List<WaveformCache.Entry> entries=WaveformCache.entries(this);
+        LinearLayout content=new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20),dp(8),dp(20),0);
+
+        TextView summary=new TextView(this);
+        summary.setText("Saved waveforms: "+stats.count+"\nInternal storage used: "+formatBytes(stats.bytes));
+        summary.setTextColor(Color.WHITE);
+        summary.setTextSize(15);
+        summary.setPadding(0,0,0,dp(12));
+        content.addView(summary);
+
+        ScrollView list=new ScrollView(this);
+        LinearLayout rows=new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        if(entries.isEmpty()){
+            TextView empty=new TextView(this);
+            empty.setText("No saved waveforms");
+            empty.setTextColor(0xFFB8C4D8);
+            empty.setTextSize(14);
+            empty.setPadding(0,dp(10),0,dp(10));
+            rows.addView(empty);
+        }else{
+            for(WaveformCache.Entry entry:entries){
+                LinearLayout row=new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(0,dp(8),0,dp(8));
+
+                LinearLayout labels=new LinearLayout(this);
+                labels.setOrientation(LinearLayout.VERTICAL);
+                labels.setGravity(Gravity.CENTER_VERTICAL);
+                TextView name=new TextView(this);
+                name.setText(entry.name);
+                name.setTextColor(Color.WHITE);
+                name.setTextSize(14);
+                name.setMaxLines(1);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                labels.addView(name,new LinearLayout.LayoutParams(-1,-2));
+                if(!entry.folder.isEmpty()){
+                    TextView folder=new TextView(this);
+                    folder.setText(entry.folder);
+                    folder.setTextColor(0xFFB8C4D8);
+                    folder.setTextSize(12);
+                    folder.setMaxLines(1);
+                    folder.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                    labels.addView(folder,new LinearLayout.LayoutParams(-1,-2));
+                }
+                row.addView(labels,new LinearLayout.LayoutParams(0,-2,1f));
+
+                TextView size=new TextView(this);
+                size.setText(formatBytes(entry.bytes));
+                size.setTextColor(0xFFB8C4D8);
+                size.setTextSize(12);
+                size.setGravity(Gravity.CENTER_VERTICAL);
+                size.setPadding(dp(8),0,dp(8),0);
+                row.addView(size);
+
+                Button delete=new Button(this);
+                delete.setText("Delete");
+                delete.setTextSize(11);
+                delete.setMinWidth(0);
+                delete.setMinimumWidth(0);
+                delete.setPadding(dp(5),0,dp(5),0);
+                delete.setOnClickListener(v->{
+                    androidx.appcompat.app.AlertDialog dialog=(androidx.appcompat.app.AlertDialog)v.getTag();
+                    if(dialog!=null)dialog.dismiss();
+                    confirmDeleteWaveform(entry);
+                });
+                row.addView(delete,new LinearLayout.LayoutParams(-2,dp(40)));
+                rows.addView(row,new LinearLayout.LayoutParams(-1,-2));
+                View divider=new View(this);
+                divider.setBackgroundColor(0x33FFFFFF);
+                rows.addView(divider,new LinearLayout.LayoutParams(-1,dp(1)));
+            }
+        }
+        list.addView(rows);
+        content.addView(list,new LinearLayout.LayoutParams(-1,Math.min(dp(420),dp(Math.max(90,entries.size()*66)))));
+
         androidx.appcompat.app.AlertDialog.Builder builder=new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("Waveform storage")
-                .setMessage(message)
+                .setView(content)
                 .setPositiveButton("Close",null);
         if(stats.count>0)builder.setNeutralButton("Delete all",(dialog,which)->confirmDeleteAllWaveforms(stats.count));
-        builder.show();
+        androidx.appcompat.app.AlertDialog dialog=builder.create();
+        for(int i=0;i<rows.getChildCount();i++){
+            View child=rows.getChildAt(i);
+            if(child instanceof LinearLayout){
+                LinearLayout row=(LinearLayout)child;
+                for(int j=0;j<row.getChildCount();j++){
+                    View item=row.getChildAt(j);
+                    if(item instanceof Button)item.setTag(dialog);
+                }
+            }
+        }
+        dialog.show();
+    }
+
+    private void confirmDeleteWaveform(WaveformCache.Entry entry){
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Delete waveform?")
+                .setMessage("Delete the saved waveform for "+entry.name+"? It will be recreated when needed.")
+                .setNegativeButton("Cancel",null)
+                .setPositiveButton("Delete",(dialog,which)->{
+                    long deletedBytes=WaveformCache.deleteByKey(this,entry.key);
+                    if(waveform!=null&&sourceUri!=null)waveform.setCacheSizeBytes(WaveformCache.size(this,sourceUri));
+                    Toast.makeText(this,deletedBytes>0?"Deleted waveform · "+formatBytes(deletedBytes):"Waveform was already unavailable",Toast.LENGTH_LONG).show();
+                    showWaveformCacheStats();
+                })
+                .show();
     }
 
     private void confirmDeleteAllWaveforms(int count){
