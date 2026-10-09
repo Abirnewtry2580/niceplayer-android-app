@@ -594,7 +594,7 @@
                 const progressLabel=document.createElement('span');progressLabel.className='video-progress-label';
                 const progressTrack=document.createElement('div');progressTrack.className='video-progress-track';
                 const progressFill=document.createElement('div');progressFill.className='video-progress-fill';progressTrack.appendChild(progressFill);progress.append(progressLabel,progressTrack);
-                const history=playbackHistoryByUri.get(item.uri),lastPosition=history?Math.max(0,Math.min(Number(history.position)||0,Number(item.duration)||Infinity)):0,totalDuration=Math.max(0,Number(item.duration)||0);
+                const history=playbackHistoryByUri.get(item.uri),rawPosition=history?history.position:item.position,lastPosition=Math.max(0,Math.min(Number(rawPosition)||0,Number(item.duration)||Infinity)),totalDuration=Math.max(0,Number(item.duration)||0);
                 progressLabel.textContent=(history&&lastPosition>0?'Last played: ':'Not played · ')+formatTime(lastPosition/1000)+' / '+formatTime(totalDuration/1000);
                 progressFill.style.width=(totalDuration>0?Math.min(100,lastPosition/totalDuration*100):0)+'%';
                 const menu=document.createElement('button');menu.className='item-menu';menu.textContent='⋮';menu.addEventListener('click',event=>{event.stopPropagation();showMediaActions('video',item);});
@@ -714,7 +714,8 @@
                 deviceVideoList.querySelectorAll('.video-row').forEach(row=>{
                     const video=visibleDeviceVideos.find(item=>item.uri===row.dataset.uri),history=playbackHistoryByUri.get(row.dataset.uri);
                     if(!video)return;
-                    const position=history?Math.max(0,Math.min(Number(history.position)||0,Number(video.duration)||Infinity)):0;
+                    const rawPosition=history?history.position:video.position;
+                    const position=Math.max(0,Math.min(Number(rawPosition)||0,Number(video.duration)||Infinity));
                     const label=row.querySelector('.video-progress-label'),fill=row.querySelector('.video-progress-fill');
                     if(label)label.textContent=(history&&position>0?'Last played: ':'Not played · ')+formatTime(position/1000)+' / '+formatTime((video.duration||0)/1000);
                     if(fill)fill.style.width=(video.duration?Math.min(100,position/video.duration*100):0)+'%';
@@ -1213,6 +1214,7 @@
             }
         }
         document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadPlaybackHistory();});
+        window.addEventListener('niceplayerresume',()=>{loadPlaybackHistory();});
         window.addEventListener('DOMContentLoaded', scanDeviceVideos);
     </script>
 </body>
