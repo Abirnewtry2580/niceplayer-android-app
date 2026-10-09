@@ -24,7 +24,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
-    protected void onResume() {
+    public void onResume() {
         super.onResume();
         if (getBridge() != null && getBridge().getWebView() != null) {
             getBridge().getWebView().post(() -> getBridge().getWebView().evaluateJavascript(
