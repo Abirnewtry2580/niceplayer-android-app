@@ -98,7 +98,6 @@ public class PlayerActivity extends AppCompatActivity {
     private int waveformGeneration;
     private java.util.concurrent.Future<?> waveformTask;
     private boolean surfaceRefreshPending;
-    private boolean waveformCacheCleanupStarted;
     private boolean positionRestoredForItem;
     private boolean playbackStartedForItem;
     private float selectedRate = 1f;
@@ -141,6 +140,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        WaveformCache.startWatching(this);
         playlistUris = getIntent().getStringArrayListExtra("uris");
         playlistTitles = getIntent().getStringArrayListExtra("titles");
         if (playlistUris == null) playlistUris = new ArrayList<>();
@@ -1294,10 +1294,6 @@ public class PlayerActivity extends AppCompatActivity {
     @Override protected void onPause(){handler.removeCallbacks(activateHoldSpeed);if(holdSpeedActive)stopHoldSpeed();savePositionImmediately();surfaceRefreshPending=!screenshotInProgress;super.onPause();}
     @Override protected void onResume(){
         super.onResume();
-        if(!waveformCacheCleanupStarted){
-            waveformCacheCleanupStarted=true;
-            worker.execute(()->WaveformCache.cleanup(getApplicationContext()));
-        }
         if(!surfaceRefreshPending||player==null||video==null)return;
         surfaceRefreshPending=false;
         handler.postDelayed(()->{
