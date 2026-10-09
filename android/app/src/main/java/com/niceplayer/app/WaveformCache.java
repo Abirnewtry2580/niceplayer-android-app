@@ -62,6 +62,22 @@ final class WaveformCache {
         return new Stats(count,bytes);
     }
 
+    static Stats deleteAll(Context context) {
+        File dir=directory(context);
+        File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf")||name.endsWith(".npwf.tmp"));
+        if(files==null)return new Stats(0,0L);
+        int count=0;long bytes=0L;
+        for(File candidate:files){
+            if(!candidate.isFile())continue;
+            long size=candidate.length();
+            if(candidate.delete()){
+                bytes+=size;
+                if(candidate.getName().endsWith(".npwf"))count++;
+            }
+        }
+        return new Stats(count,bytes);
+    }
+
     static long delete(Context context, Uri uri) {
         File file = file(context, uri, false);
         if (file == null || !file.isFile()) return 0L;
