@@ -384,6 +384,8 @@ public class VideoLibraryPlugin extends Plugin {
                     item.put("isDownloading",(pendingColumn>=0&&cursor.getInt(pendingColumn)!=0)||looksIncomplete(displayName));
                     Uri videoUri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, String.valueOf(id));
                     item.put("uri", videoUri.toString());
+                    android.content.SharedPreferences playback=getContext().getSharedPreferences("playback",android.content.Context.MODE_PRIVATE);
+                    item.put("position",playback.getLong("position_"+videoUri.toString(),0));
                     videos.put(item);
                 }
             }
