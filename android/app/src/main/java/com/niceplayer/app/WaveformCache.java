@@ -176,16 +176,15 @@ final class WaveformCache {
     }
 
     static synchronized void cleanup(Context context) {
-        if(!hasVideoPermission(context))return;
-        Map<String,byte[]> media=currentMedia(context);
-        if(media==null)return; // A failed scan must never erase caches.
         File dir=directory(context);
         File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf"));
         if(files==null)return;
+        Map<String,byte[]> media=hasVideoPermission(context)?currentMedia(context):null;
         for(File candidate:files){
-            if(!isValidCacheFile(candidate))continue;
+            if(!isValidCacheFile(candidate)){candidate.delete();continue;}
             String filename=candidate.getName();
-            if(!filename.matches("[0-9a-f]{64}\\.npwf"))continue;
+            if(!filename.matches("[0-9a-f]{64}\\.npwf")){candidate.delete();continue;}
+            if(media==null)continue; // A failed or unavailable scan must preserve valid caches.
             String key=filename.substring(0,64);
             byte[] current=media.get(key);
             try(DataInputStream input=new DataInputStream(new BufferedInputStream(new FileInputStream(candidate)))){
