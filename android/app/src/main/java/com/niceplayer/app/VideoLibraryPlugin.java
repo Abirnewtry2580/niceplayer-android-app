@@ -296,6 +296,7 @@ public class VideoLibraryPlugin extends Plugin {
     }
 
     private void queryFolders(PluginCall call) {
+        WaveformCache.cleanup(getContext());
         ContentResolver resolver = getContext().getContentResolver();
         Uri collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
         String[] projection = Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
