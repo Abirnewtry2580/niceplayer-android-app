@@ -1,7 +1,7 @@
 package com.niceplayer.app;
 
 import android.Manifest;
-import android.content.ContentObserver;
+import android.database.ContentObserver;
 import android.content.ContentUris;
 import android.content.Context;
 import android.database.Cursor;
