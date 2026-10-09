@@ -812,10 +812,24 @@ public class PlayerActivity extends AppCompatActivity {
     private void showWaveformCacheStats(){
         WaveformCache.Stats stats=WaveformCache.stats(this);
         String message="Saved waveforms: "+stats.count+"\nInternal storage used: "+formatBytes(stats.bytes);
-        new androidx.appcompat.app.AlertDialog.Builder(this)
+        androidx.appcompat.app.AlertDialog.Builder builder=new androidx.appcompat.app.AlertDialog.Builder(this)
                 .setTitle("Waveform storage")
                 .setMessage(message)
-                .setPositiveButton("OK",null)
+                .setPositiveButton("Close",null);
+        if(stats.count>0)builder.setNeutralButton("Delete all",(dialog,which)->confirmDeleteAllWaveforms(stats.count));
+        builder.show();
+    }
+
+    private void confirmDeleteAllWaveforms(int count){
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Delete saved waveforms?")
+                .setMessage("Delete all "+count+" saved waveform caches? They will be recreated when needed.")
+                .setNegativeButton("Cancel",null)
+                .setPositiveButton("Delete",(dialog,which)->{
+                    WaveformCache.Stats deleted=WaveformCache.deleteAll(this);
+                    if(waveform!=null&&sourceUri!=null)waveform.setCacheSizeBytes(WaveformCache.size(this,sourceUri));
+                    Toast.makeText(this,"Deleted "+deleted.count+" waveforms · "+formatBytes(deleted.bytes),Toast.LENGTH_LONG).show();
+                })
                 .show();
     }
 
