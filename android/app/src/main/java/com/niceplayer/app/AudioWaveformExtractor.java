@@ -138,9 +138,10 @@ final class AudioWaveformExtractor {
                 if (descriptor != null && descriptor.getLength() > 0) totalBytes = descriptor.getLength();
             } catch (Exception ignored) {}
         }
+        long bytesRead = 0;
         try (InputStream input = context.getContentResolver().openInputStream(uri)) {
             if (input == null) throw new IllegalStateException("Cannot open media stream");
-            int read; long bytesRead = 0;
+            int read;
             while ((read = input.read(buffer)) >= 0) {
                 checkCancelled();
                 if (read == 0) continue;
