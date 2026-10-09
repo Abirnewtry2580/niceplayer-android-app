@@ -14,6 +14,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(VideoLibraryPlugin.class);
         super.onCreate(savedInstanceState);
+        WaveformCache.startWatching(this);
         requestVideoPermissionIfNeeded();
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override public void handleOnBackPressed() {
