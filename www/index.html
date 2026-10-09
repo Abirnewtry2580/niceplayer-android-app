@@ -709,7 +709,7 @@
             const plugin=videoLibraryPlugin(),heading=document.getElementById('historyHeading'),strip=document.getElementById('historyStrip');
             if(!plugin||!plugin.getHistory)return;
             try{
-                const result=await plugin.getHistory(),allItems=result.items||[];
+                const result=await plugin.getHistory(),allItems=result.items||[],hiddenUris=[];
                 playbackHistoryByUri=new Map(allItems.map(item=>[item.uri,item]));
                 deviceVideoList.querySelectorAll('.video-row').forEach(row=>{
                     const video=visibleDeviceVideos.find(item=>item.uri===row.dataset.uri),history=playbackHistoryByUri.get(row.dataset.uri);
@@ -724,8 +724,9 @@
                     const dotHidden=String(item.bucketName||'').trim().startsWith('.');
                     const videoHidden=isHidden('video',{uri:item.uri,name:item.fileName||item.name,dotHidden,isDownloading:false});
                     const folderHidden=item.bucketId&&isHidden('folder',{bucketId:item.bucketId,name:item.bucketName||'',dotHidden,hasRunningDownloads:false});
-                    if(videoHidden||folderHidden)return false;return true;
+                    if(videoHidden||folderHidden){hiddenUris.push(item.uri);return false;}return true;
                 });
+                if(hiddenUris.length&&plugin.removeHistory)await plugin.removeHistory({uris:hiddenUris});
                 items.forEach(item=>markVideoPlayed(item.uri));
                 if(localStorage.getItem('history_hidden')==='1'){heading.style.display='none';strip.style.display='none';return;}
                 strip.style.display='flex';strip.innerHTML='';heading.style.display=items.length?'flex':'none';
