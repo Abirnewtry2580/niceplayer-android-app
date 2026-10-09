@@ -127,7 +127,6 @@ final class AudioWaveformExtractor {
 
     private static float[] readContainerEnvelope(Context context, Uri uri, int buckets, Progress progress) throws Exception {
         float[] peaks = new float[buckets]; byte[] buffer = new byte[64 * 1024];
-        java.util.ArrayList<Float> unknownSizeLevels = null;
         long totalBytes = -1;
         try (android.database.Cursor cursor = context.getContentResolver().query(uri,
                 new String[]{android.provider.OpenableColumns.SIZE}, null, null, null)) {
@@ -138,6 +137,7 @@ final class AudioWaveformExtractor {
                 if (descriptor != null && descriptor.getLength() > 0) totalBytes = descriptor.getLength();
             } catch (Exception ignored) {}
         }
+        StreamingEnvelope unknownSizeLevels = totalBytes > 0 ? null : new StreamingEnvelope(buckets);
         long bytesRead = 0;
         try (InputStream input = context.getContentResolver().openInputStream(uri)) {
             if (input == null) throw new IllegalStateException("Cannot open media stream");
@@ -154,7 +154,6 @@ final class AudioWaveformExtractor {
                             sampleOffset * buckets / totalBytes);
                     peaks[targetBucket] = Math.max(peaks[targetBucket], level);
                 } else {
-                    if (unknownSizeLevels == null) unknownSizeLevels = new java.util.ArrayList<>();
                     unknownSizeLevels.add(level);
                 }
                 bytesRead += read;
@@ -162,14 +161,7 @@ final class AudioWaveformExtractor {
             }
         }
         if (bytesRead == 0) throw new IllegalStateException("Empty media stream");
-        if (unknownSizeLevels != null) {
-            int samples = unknownSizeLevels.size();
-            for (int i = 0; i < samples; i++) {
-                int targetBucket = (int)Math.min(buckets - 1L,
-                        (2L * i + 1L) * buckets / (2L * samples));
-                peaks[targetBucket] = Math.max(peaks[targetBucket], unknownSizeLevels.get(i));
-            }
-        }
+        if (unknownSizeLevels != null) unknownSizeLevels.writeTo(peaks);
         return normalize(peaks);
     }
 
@@ -258,6 +250,43 @@ final class AudioWaveformExtractor {
 
     private static int bucket(long timeUs, long durationUs, int buckets) { return (int)Math.min(buckets - 1, Math.max(0, timeUs * (long)buckets / Math.max(1, durationUs))); }
     private static float[] normalize(float[] peaks) { float max = .001f; for (float v : peaks) max = Math.max(max, v); for (int i=0;i<peaks.length;i++) peaks[i]=(float)Math.sqrt(peaks[i]/max); return peaks; }
+    /** Keeps unknown-length stream sampling bounded while preserving order across the whole file. */
+    private static final class StreamingEnvelope {
+        private final float[] samples;
+        private int size;
+        private long stride = 1, pendingCount;
+        private float pendingPeak;
+
+        StreamingEnvelope(int buckets) { samples = new float[Math.max(2, buckets * 2)]; }
+
+        void add(float level) {
+            pendingPeak = Math.max(pendingPeak, level);
+            pendingCount++;
+            if (pendingCount >= stride) flush();
+        }
+
+        private void flush() {
+            if (size == samples.length) {
+                for (int i = 0; i < size / 2; i++)
+                    samples[i] = Math.max(samples[i * 2], samples[i * 2 + 1]);
+                size /= 2;
+                stride *= 2;
+            }
+            samples[size++] = pendingPeak;
+            pendingPeak = 0;
+            pendingCount = 0;
+        }
+
+        void writeTo(float[] buckets) {
+            if (pendingCount > 0) flush();
+            for (int i = 0; i < size; i++) {
+                int target = (int)Math.min(buckets.length - 1L,
+                        (2L * i + 1L) * buckets.length / (2L * size));
+                buckets[target] = Math.max(buckets[target], samples[i]);
+            }
+        }
+    }
+
     private static final class Track {
         final MediaFormat format; final String mime; final long durationUs;
         Track(MediaFormat format, String mime, long durationUs) { this.format=format; this.mime=mime; this.durationUs=durationUs; }
