@@ -126,7 +126,8 @@ final class AudioWaveformExtractor {
     }
 
     private static float[] readContainerEnvelope(Context context, Uri uri, int buckets, Progress progress) throws Exception {
-        float[] peaks = new float[buckets]; byte[] buffer = new byte[64 * 1024]; int bucket = 0;
+        float[] peaks = new float[buckets]; byte[] buffer = new byte[64 * 1024];
+        java.util.ArrayList<Float> unknownSizeLevels = null;
         long totalBytes = -1;
         try (android.database.Cursor cursor = context.getContentResolver().query(uri,
                 new String[]{android.provider.OpenableColumns.SIZE}, null, null, null)) {
@@ -145,13 +146,29 @@ final class AudioWaveformExtractor {
                 if (read == 0) continue;
                 long sum = 0; int step = Math.max(1, read / 1024), count = 0;
                 for (int i = 0; i < read; i += step) { sum += Math.abs((int)buffer[i]); count++; }
-                peaks[bucket % buckets] = Math.max(peaks[bucket % buckets], count == 0 ? 0 : sum / (count * 128f));
-                bucket++;
+                float level = count == 0 ? 0 : sum / (count * 128f);
+                if (totalBytes > 0) {
+                    long sampleOffset = bytesRead + read / 2L;
+                    int targetBucket = (int)Math.min(buckets - 1L,
+                            sampleOffset * buckets / totalBytes);
+                    peaks[targetBucket] = Math.max(peaks[targetBucket], level);
+                } else {
+                    if (unknownSizeLevels == null) unknownSizeLevels = new java.util.ArrayList<>();
+                    unknownSizeLevels.add(level);
+                }
                 bytesRead += read;
                 if (totalBytes > 0) progress.report(bytesRead, totalBytes);
             }
         }
-        if (bucket == 0) throw new IllegalStateException("Empty media stream");
+        if (bytesRead == 0) throw new IllegalStateException("Empty media stream");
+        if (unknownSizeLevels != null) {
+            int samples = unknownSizeLevels.size();
+            for (int i = 0; i < samples; i++) {
+                int targetBucket = (int)Math.min(buckets - 1L,
+                        (2L * i + 1L) * buckets / (2L * samples));
+                peaks[targetBucket] = Math.max(peaks[targetBucket], unknownSizeLevels.get(i));
+            }
+        }
         return normalize(peaks);
     }
 
