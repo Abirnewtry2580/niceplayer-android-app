@@ -799,13 +799,24 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,16,14,"Subtitle appearance");
         m.getMenu().add(0,17,15,"Playlist");
         m.getMenu().add(0,18,16,"Audio waveform: "+(waveformEnabled?"On":"Off"));
+        m.getMenu().add(0,20,19,"Waveform storage");
         if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,17,"Picture in picture");m.getMenu().add(0,15,18,"Auto pop-up: "+(autoPip?"On":"Off"));}
-        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:audioSyncMenu();break;case 19:subtitleSyncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;}return true;});m.show();
+        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:audioSyncMenu();break;case 19:subtitleSyncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;case 20:showWaveformCacheStats();break;}return true;});m.show();
     }
     private void deleteSavedWaveform(){
         long bytes=WaveformCache.delete(this,sourceUri);
         waveform.setCacheSizeBytes(0);
         Toast.makeText(this,bytes>0?"Waveform deleted · "+formatBytes(bytes):"No saved waveform",Toast.LENGTH_SHORT).show();
+    }
+
+    private void showWaveformCacheStats(){
+        WaveformCache.Stats stats=WaveformCache.stats(this);
+        String message="Saved waveforms: "+stats.count+"\nInternal storage used: "+formatBytes(stats.bytes);
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Waveform storage")
+                .setMessage(message)
+                .setPositiveButton("OK",null)
+                .show();
     }
 
     private void analyzeWaveform(){
