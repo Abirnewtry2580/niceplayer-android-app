@@ -549,17 +549,35 @@ public class PlayerActivity extends AppCompatActivity {
         Uri uri=sourceUri;
         long duration=Math.max(0,player.getLength());
         int buckets=(int)Math.max(600,Math.min(72_000,duration/100L));
-        waveformTask = worker.submit(()->AudioWaveformExtractor.extract(this,uri,buckets,new AudioWaveformExtractor.Callback(){
-            public void progress(int percent,long remainingMs){runOnUiThread(()->{if(currentWaveformRequest(generation,uri))waveform.setLoadingProgress(percent,remainingMs);});}
-            public void complete(AudioWaveformExtractor.Result result){runOnUiThread(()->{
-                if (!currentWaveformRequest(generation, uri)) return;
-                waveform.setLoading(false);waveform.setAnalysis(result);finishWaveformAnalysis();
-            });}
-            public void failed(){runOnUiThread(()->{
-                if (!currentWaveformRequest(generation, uri)) return;
-                waveform.setLoading(false);Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();
-            });}
-        }));
+        waveformTask = worker.submit(()->{
+            AudioWaveformExtractor.Result cached=WaveformCache.read(this,uri,buckets,duration);
+            if(cached!=null){
+                runOnUiThread(()->{
+                    if(!currentWaveformRequest(generation,uri))return;
+                    waveform.setLoading(false);waveform.setAnalysis(cached);
+                    Toast.makeText(this,"Waveform loaded from internal storage · "+formatBytes(WaveformCache.size(this,uri)),Toast.LENGTH_SHORT).show();
+                    finishWaveformAnalysis();
+                });
+                return;
+            }
+            AudioWaveformExtractor.extract(this,uri,buckets,new AudioWaveformExtractor.Callback(){
+                public void progress(int percent,long remainingMs){runOnUiThread(()->{if(currentWaveformRequest(generation,uri))waveform.setLoadingProgress(percent,remainingMs);});}
+                public void complete(AudioWaveformExtractor.Result result){
+                    if(!Thread.currentThread().isInterrupted())WaveformCache.write(PlayerActivity.this,uri,duration,result);
+                    runOnUiThread(()->{
+                        if (!currentWaveformRequest(generation, uri)) return;
+                        waveform.setLoading(false);waveform.setAnalysis(result);
+                        long stored=WaveformCache.size(PlayerActivity.this,uri);
+                        Toast.makeText(PlayerActivity.this,stored>0?"Waveform saved · "+formatBytes(stored):"Waveform ready (could not save cache)",Toast.LENGTH_SHORT).show();
+                        finishWaveformAnalysis();
+                    });
+                }
+                public void failed(){runOnUiThread(()->{
+                    if (!currentWaveformRequest(generation, uri)) return;
+                    waveform.setLoading(false);Toast.makeText(PlayerActivity.this,"Waveform analysis failed",Toast.LENGTH_SHORT).show();finishWaveformAnalysis();
+                });}
+            });
+        });
     }
     private void finishWaveformAnalysis(){if(resumeAfterWaveform&&player!=null&&!playbackEnded&&!player.isPlaying())player.play();resumeAfterWaveform=false;}
 
@@ -766,9 +784,23 @@ public class PlayerActivity extends AppCompatActivity {
         m.getMenu().add(0,16,14,"Subtitle appearance");
         m.getMenu().add(0,17,15,"Playlist");
         m.getMenu().add(0,18,16,"Audio waveform: "+(waveformEnabled?"On":"Off"));
+        long waveformCacheBytes=WaveformCache.size(this,sourceUri);
+        m.getMenu().add(0,20,19,"Waveform cache: "+(waveformCacheBytes>0?formatBytes(waveformCacheBytes):"None"));
+        m.getMenu().add(0,21,20,"Delete saved waveform");
         if(Build.VERSION.SDK_INT>=26){m.getMenu().add(0,6,17,"Picture in picture");m.getMenu().add(0,15,18,"Auto pop-up: "+(autoPip?"On":"Off"));}
-        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:audioSyncMenu();break;case 19:subtitleSyncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;}return true;});m.show();
+        m.setOnMenuItemClickListener(x->{switch(x.getItemId()){case 1:audioTracks();break;case 2:subtitleTracks();break;case 3:sleepTimer();break;case 4:createPreviewSheet();break;case 6:enterPip();break;case 7:soundProtectionMenu();break;case 8:toggleHeadphoneSafety();break;case 9:subtitlePicker.launch(new String[]{"application/x-subrip","text/*","application/octet-stream"});break;case 10:audioSyncMenu();break;case 19:subtitleSyncMenu();break;case 11:abRepeatMenu();break;case 12:stepFrame();break;case 13:showDiagnostics();break;case 14:audioCleanupMenu();break;case 15:autoPip=!autoPip;preferences.edit().putBoolean("auto_pip",autoPip).apply();break;case 16:subtitleStyleMenu();break;case 17:playlistMenu();break;case 18:analyzeWaveform();break;case 20:showWaveformCacheInfo();break;case 21:deleteSavedWaveform();break;}return true;});m.show();
     }
+    private void showWaveformCacheInfo(){
+        long bytes=WaveformCache.size(this,sourceUri);
+        String message=bytes>0?"Saved in app internal storage: "+formatBytes(bytes):"No saved waveform for this video.";
+        new androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Waveform storage").setMessage(message).setPositiveButton("OK",null).show();
+    }
+    private void deleteSavedWaveform(){
+        long bytes=WaveformCache.delete(this,sourceUri);
+        if(bytes>0)Toast.makeText(this,"Deleted waveform · "+formatBytes(bytes),Toast.LENGTH_SHORT).show();
+        else Toast.makeText(this,"No saved waveform to delete",Toast.LENGTH_SHORT).show();
+    }
+
     private void analyzeWaveform(){
         waveformEnabled=!waveformEnabled;
         preferences.edit().putBoolean(videoKey("waveform_enabled"),waveformEnabled).apply();
