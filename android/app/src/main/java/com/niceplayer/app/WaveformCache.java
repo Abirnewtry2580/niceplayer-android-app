@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.ContentUris;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.MediaStore;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -83,12 +84,15 @@ final class WaveformCache {
             validFiles.put(filename.substring(0,64),candidate);
         }
         Map<String,String[]> mediaNames=new HashMap<>();
-        String[] projection={MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
+        String[] projection=Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
+                ?new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.RELATIVE_PATH}
+                :new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
         try(Cursor cursor=context.getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,projection,null,null,null)){
             if(cursor!=null){
                 int idColumn=cursor.getColumnIndex(MediaStore.Video.Media._ID);
                 int nameColumn=cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME);
                 int folderColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
+                int pathColumn=cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH);
                 while(cursor.moveToNext()){
                     if(idColumn<0||nameColumn<0)break;
                     Uri uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,cursor.getLong(idColumn));
@@ -96,7 +100,12 @@ final class WaveformCache {
                     if(key!=null&&validFiles.containsKey(key)){
                         String name=cursor.getString(nameColumn);
                         String folder=folderColumn<0?null:cursor.getString(folderColumn);
-                        mediaNames.put(key,new String[]{name==null||name.isEmpty()?"Video":name,folder==null?"":folder});
+                        String relativePath=pathColumn<0?null:cursor.getString(pathColumn);
+                        if(isHiddenLocation(folder,relativePath)){
+                            mediaNames.put(key,new String[]{"Hidden video · "+key.substring(0,8),""});
+                        }else{
+                            mediaNames.put(key,new String[]{name==null||name.isEmpty()?"Video":name,folder==null?"":folder});
+                        }
                     }
                 }
             }
@@ -115,6 +124,16 @@ final class WaveformCache {
             return bySize!=0?bySize:a.name.compareToIgnoreCase(b.name);
         });
         return result;
+    }
+
+    private static boolean isHiddenLocation(String bucketName,String relativePath) {
+        if(bucketName!=null&&bucketName.trim().startsWith("."))return true;
+        if(relativePath==null||relativePath.trim().isEmpty())return false;
+        for(String part:relativePath.replace('\\','/').split("/")){
+            String name=part.trim();
+            if(name.length()>1&&name.startsWith("."))return true;
+        }
+        return false;
     }
 
     static Stats stats(Context context) {
