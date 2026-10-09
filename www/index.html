@@ -733,6 +733,19 @@
             }catch(error){}
         }
 
+        async function refreshPlaybackState(){
+            await loadPlaybackHistory();
+            const plugin=videoLibraryPlugin(),folder=currentFolder;
+            if(!plugin||!folder||!folder.bucketId||deviceVideoList.style.display==='none')return;
+            try{
+                const result=await plugin.getVideos({bucketId:folder.bucketId});
+                if(currentFolder!==folder)return;
+                visibleDeviceVideos=(result.videos||[]).map(item=>({...item,bucketId:folder.bucketId,bucketName:folder.name,url:Capacitor.convertFileSrc(item.uri)}));
+                renderVideoRows(visibleDeviceVideos);
+                await loadPlaybackHistory();
+            }catch(error){}
+        }
+
         function setVideoSource(url) {
             if (activeVideoUrl) URL.revokeObjectURL(activeVideoUrl);
             activeVideoUrl = url;
@@ -1214,7 +1227,7 @@
             }
         }
         document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadPlaybackHistory();});
-        window.addEventListener('niceplayerresume',()=>{loadPlaybackHistory();});
+        window.addEventListener('niceplayerresume',()=>{refreshPlaybackState();});
         window.addEventListener('DOMContentLoaded', scanDeviceVideos);
     </script>
 </body>
