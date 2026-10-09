@@ -1,11 +1,16 @@
 package com.niceplayer.app;
 
+import android.Manifest;
+import android.content.ContentObserver;
 import android.content.ContentUris;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.provider.MediaStore;
+import androidx.core.content.ContextCompat;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
@@ -29,8 +34,38 @@ final class WaveformCache {
     private static final int LEGACY_VERSION = 1;
     private static final int MAX_BUCKETS = 72_000;
     private static final int FINGERPRINT_BYTES = 32;
+    private static HandlerThread observerThread;
+    private static Handler observerHandler;
+    private static ContentObserver mediaObserver;
+    private static Runnable cleanupRunnable;
 
     private WaveformCache() {}
+
+    static void startWatching(Context context) {
+        synchronized(WaveformCache.class){
+            if(mediaObserver!=null)return;
+            Context app=context.getApplicationContext();
+            observerThread=new HandlerThread("NicePlayerWaveformCache");
+            observerThread.start();
+            observerHandler=new Handler(observerThread.getLooper());
+            cleanupRunnable=()->cleanup(app);
+            mediaObserver=new ContentObserver(observerHandler){
+                @Override public void onChange(boolean selfChange,Uri uri){
+                    observerHandler.removeCallbacks(cleanupRunnable);
+                    observerHandler.postDelayed(cleanupRunnable,700);
+                }
+            };
+            app.getContentResolver().registerContentObserver(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,true,mediaObserver);
+            observerHandler.postDelayed(cleanupRunnable,500);
+        }
+    }
+
+    private static boolean hasVideoPermission(Context context) {
+        String permission=Build.VERSION.SDK_INT>=Build.VERSION_CODES.TIRAMISU
+                ?Manifest.permission.READ_MEDIA_VIDEO:Manifest.permission.READ_EXTERNAL_STORAGE;
+        return ContextCompat.checkSelfPermission(context,permission)==android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
 
     private static File directory(Context context) {
         return new File(context.getFilesDir(), "waveforms");
@@ -140,7 +175,8 @@ final class WaveformCache {
         return true;
     }
 
-    static void cleanup(Context context) {
+    static synchronized void cleanup(Context context) {
+        if(!hasVideoPermission(context))return;
         Map<String,byte[]> media=currentMedia(context);
         if(media==null)return; // A failed scan must never erase caches.
         File dir=directory(context);
@@ -189,10 +225,13 @@ final class WaveformCache {
             }catch(Exception ignored){}
         }
         File[] temporary=dir.listFiles((parent,name)->name.endsWith(".npwf.tmp"));
-        if(temporary!=null)for(File candidate:temporary)candidate.delete();
+        if(temporary!=null){
+            long staleBefore=System.currentTimeMillis()-24L*60L*60L*1000L;
+            for(File candidate:temporary)if(candidate.lastModified()<staleBefore)candidate.delete();
+        }
     }
 
-    static List<Entry> entries(Context context) {
+    static synchronized List<Entry> entries(Context context) {
         cleanup(context);
         File dir=directory(context);
         File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf"));
@@ -257,7 +296,7 @@ final class WaveformCache {
         return false;
     }
 
-    static Stats stats(Context context) {
+    static synchronized Stats stats(Context context) {
         File dir=directory(context);
         File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf"));
         if(files==null)return new Stats(0,0L);
@@ -268,7 +307,7 @@ final class WaveformCache {
         return new Stats(count,bytes);
     }
 
-    static Stats deleteAll(Context context) {
+    static synchronized Stats deleteAll(Context context) {
         File dir=directory(context);
         File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf")||name.endsWith(".npwf.tmp"));
         if(files==null)return new Stats(0,0L);
@@ -284,7 +323,7 @@ final class WaveformCache {
         return new Stats(count,bytes);
     }
 
-    static long deleteByKey(Context context,String key) {
+    static synchronized long deleteByKey(Context context,String key) {
         if(key==null||!key.matches("[0-9a-f]{64}"))return 0L;
         File candidate=new File(directory(context),key+".npwf");
         if(!candidate.isFile())return 0L;
@@ -292,14 +331,14 @@ final class WaveformCache {
         return candidate.delete()?bytes:0L;
     }
 
-    static long delete(Context context, Uri uri) {
+    static synchronized long delete(Context context, Uri uri) {
         File file = file(context, uri, false);
         if (file == null || !file.isFile()) return 0L;
         long bytes = file.length();
         return file.delete() ? bytes : 0L;
     }
 
-    static AudioWaveformExtractor.Result read(Context context, Uri uri, int expectedBuckets, long expectedDurationMs) {
+    static synchronized AudioWaveformExtractor.Result read(Context context, Uri uri, int expectedBuckets, long expectedDurationMs) {
         File file = file(context, uri, false);
         if (file == null || !file.isFile() || expectedBuckets < 1 || expectedBuckets > MAX_BUCKETS) return null;
         byte[] current=currentFingerprint(context,uri);
@@ -331,7 +370,7 @@ final class WaveformCache {
         }
     }
 
-    static void write(Context context, Uri uri, long durationMs, AudioWaveformExtractor.Result result) {
+    static synchronized void write(Context context, Uri uri, long durationMs, AudioWaveformExtractor.Result result) {
         if (result == null || result.levels == null || result.speech == null
                 || result.levels.length == 0 || result.levels.length != result.speech.length
                 || result.levels.length > MAX_BUCKETS) return;
