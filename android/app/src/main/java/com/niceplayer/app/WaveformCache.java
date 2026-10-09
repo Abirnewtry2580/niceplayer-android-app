@@ -38,6 +38,30 @@ final class WaveformCache {
         return file != null && file.isFile() ? file.length() : 0L;
     }
 
+    static final class Stats {
+        final int count;
+        final long bytes;
+        Stats(int count,long bytes){this.count=count;this.bytes=bytes;}
+    }
+
+    static Stats stats(Context context) {
+        File dir=directory(context);
+        File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf"));
+        if(files==null)return new Stats(0,0L);
+        int count=0;long bytes=0L;
+        for(File candidate:files){
+            if(!candidate.isFile())continue;
+            try(DataInputStream input=new DataInputStream(new BufferedInputStream(new FileInputStream(candidate)))){
+                if(input.readInt()!=MAGIC||input.readInt()!=VERSION)continue;
+                input.readLong();
+                int samples=input.readInt();
+                if(samples<1||samples>MAX_BUCKETS||candidate.length()!=20L+5L*samples)continue;
+                count++;bytes+=candidate.length();
+            }catch(Exception ignored){}
+        }
+        return new Stats(count,bytes);
+    }
+
     static long delete(Context context, Uri uri) {
         File file = file(context, uri, false);
         if (file == null || !file.isFile()) return 0L;
