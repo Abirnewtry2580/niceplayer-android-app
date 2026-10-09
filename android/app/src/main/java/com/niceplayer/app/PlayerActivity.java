@@ -98,6 +98,7 @@ public class PlayerActivity extends AppCompatActivity {
     private int waveformGeneration;
     private java.util.concurrent.Future<?> waveformTask;
     private boolean surfaceRefreshPending;
+    private boolean waveformCacheCleanupStarted;
     private boolean positionRestoredForItem;
     private boolean playbackStartedForItem;
     private float selectedRate = 1f;
@@ -810,8 +811,8 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void showWaveformCacheStats(){
-        WaveformCache.Stats stats=WaveformCache.stats(this);
         List<WaveformCache.Entry> entries=WaveformCache.entries(this);
+        WaveformCache.Stats stats=WaveformCache.stats(this);
         LinearLayout content=new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(20),dp(8),dp(20),0);
@@ -1293,6 +1294,10 @@ public class PlayerActivity extends AppCompatActivity {
     @Override protected void onPause(){handler.removeCallbacks(activateHoldSpeed);if(holdSpeedActive)stopHoldSpeed();savePositionImmediately();surfaceRefreshPending=!screenshotInProgress;super.onPause();}
     @Override protected void onResume(){
         super.onResume();
+        if(!waveformCacheCleanupStarted){
+            waveformCacheCleanupStarted=true;
+            worker.execute(()->WaveformCache.cleanup(getApplicationContext()));
+        }
         if(!surfaceRefreshPending||player==null||video==null)return;
         surfaceRefreshPending=false;
         handler.postDelayed(()->{
