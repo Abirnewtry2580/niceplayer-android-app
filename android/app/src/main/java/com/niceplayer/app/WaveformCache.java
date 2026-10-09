@@ -1,7 +1,7 @@
 package com.niceplayer.app;
 
-import android.content.Context;
 import android.content.ContentUris;
+import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
@@ -15,19 +15,20 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.Locale;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /** Persistent app-private cache for completed waveform analyses. */
 final class WaveformCache {
     private static final int MAGIC = 0x4E505746;
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
+    private static final int LEGACY_VERSION = 1;
     private static final int MAX_BUCKETS = 72_000;
+    private static final int FINGERPRINT_BYTES = 32;
 
     private WaveformCache() {}
 
@@ -65,14 +66,134 @@ final class WaveformCache {
     private static boolean isValidCacheFile(File candidate) {
         if(candidate==null||!candidate.isFile())return false;
         try(DataInputStream input=new DataInputStream(new BufferedInputStream(new FileInputStream(candidate)))){
-            if(input.readInt()!=MAGIC||input.readInt()!=VERSION)return false;
+            if(input.readInt()!=MAGIC)return false;
+            int version=input.readInt();
+            if(version!=VERSION&&version!=LEGACY_VERSION)return false;
             input.readLong();
             int samples=input.readInt();
-            return samples>=1&&samples<=MAX_BUCKETS&&candidate.length()==20L+5L*samples;
+            if(samples<1||samples>MAX_BUCKETS)return false;
+            long expected=20L+5L*samples+(version==VERSION?FINGERPRINT_BYTES:0);
+            return candidate.length()==expected;
         }catch(Exception ignored){return false;}
     }
 
+    private static byte[] mediaFingerprint(Cursor cursor,int nameColumn,int bucketIdColumn,int folderColumn,int pathColumn) {
+        String name=nameColumn<0?"":cursor.getString(nameColumn);
+        String bucketId=bucketIdColumn<0?"":cursor.getString(bucketIdColumn);
+        String folder=folderColumn<0?"":cursor.getString(folderColumn);
+        String path=pathColumn<0?"":cursor.getString(pathColumn);
+        String n=name==null?"":name;
+        String bucket=bucketId==null?"":bucketId;
+        String folderName=folder==null?"":folder;
+        String pathName=path==null?"":path;
+        String value=n.length()+":"+n+bucket.length()+":"+bucket+folderName.length()+":"+folderName
+                +pathName.length()+":"+pathName;
+        return sha256Bytes(value);
+    }
+
+    private static byte[] currentFingerprint(Context context,Uri uri) {
+        if(uri==null)return null;
+        String[] projection=Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
+                ?new String[]{MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.BUCKET_ID,
+                        MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.RELATIVE_PATH}
+                :new String[]{MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.BUCKET_ID,
+                        MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
+        try(Cursor cursor=context.getContentResolver().query(uri,projection,null,null,null)){
+            if(cursor==null||!cursor.moveToFirst())return null;
+            return mediaFingerprint(cursor,
+                    cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME),
+                    cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID),
+                    cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME),
+                    cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH));
+        }catch(Exception ignored){return null;}
+    }
+
+    private static Map<String,byte[]> currentMedia(Context context) {
+        Map<String,byte[]> result=new HashMap<>();
+        String[] projection=Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
+                ?new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,
+                        MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,
+                        MediaStore.Video.Media.RELATIVE_PATH}
+                :new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,
+                        MediaStore.Video.Media.BUCKET_ID,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
+        try(Cursor cursor=context.getContentResolver().query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,projection,null,null,null)){
+            if(cursor==null)return null;
+            int idColumn=cursor.getColumnIndex(MediaStore.Video.Media._ID);
+            if(idColumn<0)return null;
+            int nameColumn=cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME);
+            int bucketIdColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_ID);
+            int folderColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
+            int pathColumn=cursor.getColumnIndex(MediaStore.Video.Media.RELATIVE_PATH);
+            while(cursor.moveToNext()){
+                Uri uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,cursor.getLong(idColumn));
+                String key=sha256(uri.toString());
+                if(key!=null)result.put(key,mediaFingerprint(cursor,nameColumn,bucketIdColumn,folderColumn,pathColumn));
+            }
+            return result;
+        }catch(Exception ignored){return null;}
+    }
+
+    private static boolean isEmptyFingerprint(byte[] value) {
+        if(value==null)return true;
+        for(byte part:value)if(part!=0)return false;
+        return true;
+    }
+
+    static void cleanup(Context context) {
+        Map<String,byte[]> media=currentMedia(context);
+        if(media==null)return; // A failed scan must never erase caches.
+        File dir=directory(context);
+        File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf"));
+        if(files==null)return;
+        for(File candidate:files){
+            if(!isValidCacheFile(candidate))continue;
+            String filename=candidate.getName();
+            if(!filename.matches("[0-9a-f]{64}\\.npwf"))continue;
+            String key=filename.substring(0,64);
+            byte[] current=media.get(key);
+            try(DataInputStream input=new DataInputStream(new BufferedInputStream(new FileInputStream(candidate)))){
+                input.readInt();
+                int version=input.readInt();
+                long duration=input.readLong();
+                int count=input.readInt();
+                if(current==null){
+                    if(version==VERSION){
+                        byte[] saved=new byte[FINGERPRINT_BYTES];
+                        input.readFully(saved);
+                        if(!isEmptyFingerprint(saved))candidate.delete();
+                    }else{
+                        candidate.delete();
+                    }
+                    continue;
+                }
+                if(version==VERSION){
+                    byte[] saved=new byte[FINGERPRINT_BYTES];
+                    input.readFully(saved);
+                    if(isEmptyFingerprint(saved)){
+                        float[] levels=new float[count];
+                        boolean[] speech=new boolean[count];
+                        for(int i=0;i<count;i++)levels[i]=input.readFloat();
+                        for(int i=0;i<count;i++)speech[i]=input.readBoolean();
+                        writeFile(candidate,duration,new AudioWaveformExtractor.Result(levels,speech),current);
+                    }else if(!Arrays.equals(saved,current)){
+                        candidate.delete();
+                    }
+                }else if(version==LEGACY_VERSION){
+                    float[] levels=new float[count];
+                    boolean[] speech=new boolean[count];
+                    for(int i=0;i<count;i++)levels[i]=input.readFloat();
+                    for(int i=0;i<count;i++)speech[i]=input.readBoolean();
+                    writeFile(candidate,duration,new AudioWaveformExtractor.Result(levels,speech),current);
+                }
+            }catch(Exception ignored){}
+        }
+        File[] temporary=dir.listFiles((parent,name)->name.endsWith(".npwf.tmp"));
+        if(temporary!=null)for(File candidate:temporary)candidate.delete();
+    }
+
     static List<Entry> entries(Context context) {
+        cleanup(context);
         File dir=directory(context);
         File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf"));
         List<Entry> result=new ArrayList<>();
@@ -85,8 +206,10 @@ final class WaveformCache {
         }
         Map<String,String[]> mediaNames=new HashMap<>();
         String[] projection=Build.VERSION.SDK_INT>=Build.VERSION_CODES.Q
-                ?new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.RELATIVE_PATH}
-                :new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
+                ?new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,
+                        MediaStore.Video.Media.BUCKET_DISPLAY_NAME,MediaStore.Video.Media.RELATIVE_PATH}
+                :new String[]{MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,
+                        MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
         try(Cursor cursor=context.getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,projection,null,null,null)){
             if(cursor!=null){
                 int idColumn=cursor.getColumnIndex(MediaStore.Video.Media._ID);
@@ -110,14 +233,12 @@ final class WaveformCache {
                 }
             }
         }catch(Exception ignored){}
-        Set<String> found=new HashSet<>();
         for(Map.Entry<String,File> item:validFiles.entrySet()){
             String key=item.getKey();
             String[] label=mediaNames.get(key);
             String name=label==null?"Unavailable video · "+key.substring(0,8):label[0];
             String folder=label==null?"":label[1];
             result.add(new Entry(key,name,folder,item.getValue().length()));
-            found.add(key);
         }
         result.sort((a,b)->{
             int bySize=Long.compare(b.bytes,a.bytes);
@@ -181,17 +302,30 @@ final class WaveformCache {
     static AudioWaveformExtractor.Result read(Context context, Uri uri, int expectedBuckets, long expectedDurationMs) {
         File file = file(context, uri, false);
         if (file == null || !file.isFile() || expectedBuckets < 1 || expectedBuckets > MAX_BUCKETS) return null;
+        byte[] current=currentFingerprint(context,uri);
         try (DataInputStream input = new DataInputStream(new BufferedInputStream(new FileInputStream(file)))) {
-            if (input.readInt() != MAGIC || input.readInt() != VERSION) return null;
+            if (input.readInt() != MAGIC) return null;
+            int version=input.readInt();
+            if(version!=VERSION&&version!=LEGACY_VERSION)return null;
             if (input.readLong() != expectedDurationMs) return null;
             int count = input.readInt();
             if (count != expectedBuckets || count < 1 || count > MAX_BUCKETS) return null;
+            if(version==VERSION){
+                byte[] saved=new byte[FINGERPRINT_BYTES];
+                input.readFully(saved);
+                if(current!=null&&!Arrays.equals(saved,current)){
+                    file.delete();
+                    return null;
+                }
+            }
             float[] levels = new float[count];
             boolean[] speech = new boolean[count];
             for (int i = 0; i < count; i++) levels[i] = input.readFloat();
             for (int i = 0; i < count; i++) speech[i] = input.readBoolean();
             if (input.read() != -1) return null;
-            return new AudioWaveformExtractor.Result(levels, speech);
+            AudioWaveformExtractor.Result result=new AudioWaveformExtractor.Result(levels, speech);
+            if(version==LEGACY_VERSION&&current!=null)write(context,uri,expectedDurationMs,result);
+            return result;
         } catch (Exception error) {
             return null;
         }
@@ -203,12 +337,18 @@ final class WaveformCache {
                 || result.levels.length > MAX_BUCKETS) return;
         File target = file(context, uri, true);
         if (target == null) return;
+        writeFile(target,durationMs,result,currentFingerprint(context,uri));
+    }
+
+    private static void writeFile(File target,long durationMs,AudioWaveformExtractor.Result result,byte[] fingerprint) {
         File temporary = new File(target.getParentFile(), target.getName() + ".tmp");
         try (DataOutputStream output = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(temporary)))) {
             output.writeInt(MAGIC);
             output.writeInt(VERSION);
             output.writeLong(durationMs);
             output.writeInt(result.levels.length);
+            byte[] saved=fingerprint==null?new byte[FINGERPRINT_BYTES]:fingerprint;
+            output.write(saved);
             for (float level : result.levels) output.writeFloat(level);
             for (boolean spoken : result.speech) output.writeBoolean(spoken);
         } catch (Exception error) {
@@ -222,14 +362,19 @@ final class WaveformCache {
         if (!temporary.renameTo(target)) temporary.delete();
     }
 
-    private static String sha256(String value) {
+    private static byte[] sha256Bytes(String value) {
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder result = new StringBuilder(digest.length * 2);
-            for (byte part : digest) result.append(String.format(Locale.US, "%02x", part & 0xff));
-            return result.toString();
+            return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
         } catch (Exception error) {
             return null;
         }
+    }
+
+    private static String sha256(String value) {
+        byte[] digest=sha256Bytes(value);
+        if(digest==null)return null;
+        StringBuilder result = new StringBuilder(digest.length * 2);
+        for (byte part : digest) result.append(String.format(Locale.US, "%02x", part & 0xff));
+        return result.toString();
     }
 }
