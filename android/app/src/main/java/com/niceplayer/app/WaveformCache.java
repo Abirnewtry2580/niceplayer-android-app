@@ -1,7 +1,10 @@
 package com.niceplayer.app;
 
 import android.content.Context;
+import android.content.ContentUris;
+import android.database.Cursor;
 import android.net.Uri;
+import android.provider.MediaStore;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
@@ -12,6 +15,12 @@ import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** Persistent app-private cache for completed waveform analyses. */
 final class WaveformCache {
@@ -44,20 +53,77 @@ final class WaveformCache {
         Stats(int count,long bytes){this.count=count;this.bytes=bytes;}
     }
 
+    static final class Entry {
+        final String key;
+        final String name;
+        final String folder;
+        final long bytes;
+        Entry(String key,String name,String folder,long bytes){this.key=key;this.name=name;this.folder=folder;this.bytes=bytes;}
+    }
+
+    private static boolean isValidCacheFile(File candidate) {
+        if(candidate==null||!candidate.isFile())return false;
+        try(DataInputStream input=new DataInputStream(new BufferedInputStream(new FileInputStream(candidate)))){
+            if(input.readInt()!=MAGIC||input.readInt()!=VERSION)return false;
+            input.readLong();
+            int samples=input.readInt();
+            return samples>=1&&samples<=MAX_BUCKETS&&candidate.length()==20L+5L*samples;
+        }catch(Exception ignored){return false;}
+    }
+
+    static List<Entry> entries(Context context) {
+        File dir=directory(context);
+        File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf"));
+        List<Entry> result=new ArrayList<>();
+        if(files==null)return result;
+        Map<String,File> validFiles=new HashMap<>();
+        for(File candidate:files){
+            String filename=candidate.getName();
+            if(!isValidCacheFile(candidate)||!filename.matches("[0-9a-f]{64}\\.npwf"))continue;
+            validFiles.put(filename.substring(0,64),candidate);
+        }
+        Map<String,String[]> mediaNames=new HashMap<>();
+        String[] projection={MediaStore.Video.Media._ID,MediaStore.Video.Media.DISPLAY_NAME,MediaStore.Video.Media.BUCKET_DISPLAY_NAME};
+        try(Cursor cursor=context.getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,projection,null,null,null)){
+            if(cursor!=null){
+                int idColumn=cursor.getColumnIndex(MediaStore.Video.Media._ID);
+                int nameColumn=cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME);
+                int folderColumn=cursor.getColumnIndex(MediaStore.Video.Media.BUCKET_DISPLAY_NAME);
+                while(cursor.moveToNext()){
+                    if(idColumn<0||nameColumn<0)break;
+                    Uri uri=ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,cursor.getLong(idColumn));
+                    String key=sha256(uri.toString());
+                    if(key!=null&&validFiles.containsKey(key)){
+                        String name=cursor.getString(nameColumn);
+                        String folder=folderColumn<0?null:cursor.getString(folderColumn);
+                        mediaNames.put(key,new String[]{name==null||name.isEmpty()?"Video":name,folder==null?"":folder});
+                    }
+                }
+            }
+        }catch(Exception ignored){}
+        Set<String> found=new HashSet<>();
+        for(Map.Entry<String,File> item:validFiles.entrySet()){
+            String key=item.getKey();
+            String[] label=mediaNames.get(key);
+            String name=label==null?"Unavailable video · "+key.substring(0,8):label[0];
+            String folder=label==null?"":label[1];
+            result.add(new Entry(key,name,folder,item.getValue().length()));
+            found.add(key);
+        }
+        result.sort((a,b)->{
+            int bySize=Long.compare(b.bytes,a.bytes);
+            return bySize!=0?bySize:a.name.compareToIgnoreCase(b.name);
+        });
+        return result;
+    }
+
     static Stats stats(Context context) {
         File dir=directory(context);
         File[] files=dir.listFiles((parent,name)->name.endsWith(".npwf"));
         if(files==null)return new Stats(0,0L);
         int count=0;long bytes=0L;
         for(File candidate:files){
-            if(!candidate.isFile())continue;
-            try(DataInputStream input=new DataInputStream(new BufferedInputStream(new FileInputStream(candidate)))){
-                if(input.readInt()!=MAGIC||input.readInt()!=VERSION)continue;
-                input.readLong();
-                int samples=input.readInt();
-                if(samples<1||samples>MAX_BUCKETS||candidate.length()!=20L+5L*samples)continue;
-                count++;bytes+=candidate.length();
-            }catch(Exception ignored){}
+            if(isValidCacheFile(candidate)){count++;bytes+=candidate.length();}
         }
         return new Stats(count,bytes);
     }
@@ -76,6 +142,14 @@ final class WaveformCache {
             }
         }
         return new Stats(count,bytes);
+    }
+
+    static long deleteByKey(Context context,String key) {
+        if(key==null||!key.matches("[0-9a-f]{64}"))return 0L;
+        File candidate=new File(directory(context),key+".npwf");
+        if(!candidate.isFile())return 0L;
+        long bytes=candidate.length();
+        return candidate.delete()?bytes:0L;
     }
 
     static long delete(Context context, Uri uri) {
