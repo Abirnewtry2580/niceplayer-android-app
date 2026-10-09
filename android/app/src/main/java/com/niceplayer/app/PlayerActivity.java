@@ -53,7 +53,7 @@ public class PlayerActivity extends AppCompatActivity {
     private SeekBar seek;
     private WaveformView waveform;
     private GestureLevelView gestureLevel;
-    private TextView play, currentTime, totalTime, remainingTime, hint, lock, title, screenshotButton;
+    private TextView play, currentTime, totalTime, hint, lock, title, screenshotButton;
     private TextView rotationLockControl, repeatControl;
     private TextView centerTimeFeedback;
     private static final int REPEAT_OFF = 0, REPEAT_ONE = 1, REPEAT_ALL = 2;
@@ -500,10 +500,8 @@ public class PlayerActivity extends AppCompatActivity {
         LinearLayout timeRow=new LinearLayout(this);timeRow.setGravity(Gravity.CENTER_VERTICAL);
         totalTime=timeLabel("00:00",Gravity.START|Gravity.CENTER_VERTICAL);
         currentTime=timeLabel("00:00",Gravity.CENTER);
-        remainingTime=timeLabel("-00:00",Gravity.END|Gravity.CENTER_VERTICAL);
-        timeRow.addView(totalTime,new LinearLayout.LayoutParams(0,dp(24),1));
         timeRow.addView(currentTime,new LinearLayout.LayoutParams(0,dp(24),1));
-        timeRow.addView(remainingTime,new LinearLayout.LayoutParams(0,dp(24),1));
+        timeRow.addView(totalTime,new LinearLayout.LayoutParams(0,dp(24),1));
         bottom.addView(timeRow,new LinearLayout.LayoutParams(-1,dp(24)));
         seek=new SeekBar(this); seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             public void onStartTrackingTouch(SeekBar b){dragging=true;handler.removeCallbacks(hideControlsAfterDelay);} public void onProgressChanged(SeekBar b,int n,boolean from){if(from){long duration=Math.max(0,player.getLength());updateTimeLabels(n,duration);showCenterTimeFeedback(n,duration);}}
@@ -526,7 +524,6 @@ public class PlayerActivity extends AppCompatActivity {
         long safeDuration=Math.max(0,duration),safePosition=Math.max(0,Math.min(position,safeDuration));
         currentTime.setText(clock(safePosition));
         totalTime.setText(clock(safeDuration));
-        remainingTime.setText("-"+clock(Math.max(0,safeDuration-safePosition)));
     }
 
     private void cancelWaveformAnalysis() {
@@ -676,7 +673,7 @@ public class PlayerActivity extends AppCompatActivity {
                     WindowManager.LayoutParams p=getWindow().getAttributes();p.screenBrightness=Math.max(.02f,Math.min(1f,startBrightness+change));getWindow().setAttributes(p);
                     hint.setText("Brightness  "+Math.round(p.screenBrightness*100)+"%");showGestureLevel(p.screenBrightness,false);
                 }else{
-                    int max=audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),limit=headphoneSafety&&headphonesActive()?Math.max(1,Math.round(max*.7f)):max,n=Math.max(0,Math.min(limit,startVolume+Math.round(change*max)));
+                    int max=audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC),limit=headphoneSafety&&headphonesActive()?Math.max(1,Math.round(max*.7f)):max,n=Math.max(0,Math.min(limit,startVolume+symmetricRound(change*max)));
                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC,n,0);hint.setText("Volume  "+Math.round(n*100f/max)+"%");showGestureLevel(n/(float)max,true);
                 }
                 hint.setVisibility(View.VISIBLE);
@@ -685,6 +682,8 @@ public class PlayerActivity extends AppCompatActivity {
         else if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){handler.removeCallbacks(activateHoldSpeed);if(holdSpeedActive)stopHoldSpeed();hint.setVisibility(View.GONE);if(gestureLevel!=null)gestureLevel.setVisibility(View.GONE);dragging=false;}
         return true;
     }
+
+    private static int symmetricRound(float value){return value>=0?(int)Math.floor(value+0.5f):(int)Math.ceil(value-0.5f);}
 
     private void showGestureLevel(float level,boolean volumeSide){
         if(gestureLevel==null)return;
